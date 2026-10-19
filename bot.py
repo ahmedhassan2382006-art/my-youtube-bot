@@ -32,20 +32,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def check_ffmpeg() -> bool:
     if shutil.which("ffmpeg"):
-        logger.info("✅ FFmpeg موجود في مسار النظام (PATH)")
+        logger.info("✅ FFmpeg متوفر في مسار النظام")
         return True
     ffmpeg_local = os.path.join(BASE_DIR, "ffmpeg.exe")
     if os.path.isfile(ffmpeg_local):
-        logger.info("✅ FFmpeg موجود محلياً")
+        logger.info("✅ FFmpeg متوفر محلياً")
         return True
-    logger.warning("⚠️ FFmpeg غير مثبت! دمج الصوت والفيديو قد يفشل.")
+    logger.warning("⚠️ FFmpeg غير مثبت.")
     return False
 
-# ==================== مجلد التحميل المؤقت ====================
+# ==================== إعدادات التحميل ====================
 DOWNLOAD_DIR = os.path.join(tempfile.gettempdir(), "tg_media_bot")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-MAX_FILE_SIZE = 50 * 1024 * 1024  # سقف تيليجرام للبوتات 50 ميجا
+MAX_FILE_SIZE = 50 * 1024 * 1024
 SAFE_DOWNLOAD_THRESHOLD = 46 * 1024 * 1024
 
 USER_AGENT = (
@@ -62,8 +62,8 @@ YTDL_INFO_OPTS = {
     "nocheckcertificate": True,
 }
 
-# ==================== قواميس الذاكرة والطوابير ====================
-MEDIA_CACHE: Dict[str, dict] = {}       # media_id -> data
+# ==================== إدارة الذاكرة والعمليات ====================
+MEDIA_CACHE: Dict[str, dict] = {}
 USER_TASK_QUEUES: Dict[int, asyncio.Queue] = {}
 USER_CURRENT_TASK: Dict[int, str] = {}
 USER_WORKERS: Dict[int, asyncio.Task] = {}
@@ -77,78 +77,86 @@ def get_download_semaphore():
         GLOBAL_DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
     return GLOBAL_DOWNLOAD_SEMAPHORE
 
-# ==================== الترجمة والدعم اللغوي ====================
+# ==================== قاموس النصوص (تجربة مستخدم راقية ونظيفة) ====================
 I18N = {
     "ar": {
         "welcome": (
-            "👋 **مرحباً بك يا {name} في بوت التحميل الذكي!**\n\n"
-            "أرسل رابط أي مقطع من (يوتيوب، فيسبوك، تيك توك، إنستغرام، إكس، بنترست...)\n\n"
-            "🎯 **كيف يعمل البوت؟**\n"
-            "• إذا كان الملف **أقل من 50 MB** ⬅️ يرسله لك ملفاً جاهزاً بالصوت والصورة.\n"
-            "• إذا كان الملف **أكبر من 50 MB** ⬅️ يرسل لك رابط تحميل مباشر بزر فوري.\n\n"
-            "⚡ سريع، يدعم الطابور، ويعمل بدون توقف!"
+            "👋 **مرحباً بك يا {name} في بوت التحميل الذكي!**\n"
+            "المطور: **أحمد حسن عبد النبي** 👨‍💻\n\n"
+            "أرسل لي رابط أي مقطع من (يوتيوب، فيسبوك، تيك توك، إنستغرام، إكس، بنترست...)\n\n"
+            "🎯 **مميزات البوت:**\n"
+            "• إرسال المقاطع مباشرة بجودات متعددة صوت وصورة.\n"
+            "• روابط تحميل مباشرة وفائقة السرعة للمقاطع الطويلة.\n\n"
+            "🚀 أرسل الرابط الآن للبدء مباشرة!"
         ),
-        "checking": "⚡ **جاري فحص الرابط واستخراج الجودات...**",
-        "fetch_error": "❌ **فشل في جلب بيانات الرابط.** تأكد أن الحساب أو المقطع عام وليس مقيداً.",
+        "checking": "⚡ **جاري فحص الرابط وتجهيز الخيارات...**",
+        "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للجميع وليس خاصاً.",
         "no_formats": "⚠️ لم يتم العثور على صيغ قابلة للتحميل لهذا المقطع.",
         "title": "📌 **العنوان:** `{title}`",
         "platform": "🌐 **المنصة:** `{platform}`",
         "duration": "⏱ **المدة:** {duration}",
-        "choose_type": "👇 **اختر نوع التحميل المطلوب:**",
+        "choose_type": "👇 **اختر ما يناسبك للتحميل:**",
         "btn_video": "🎬 فيديو",
         "btn_audio": "🎵 صوت فقط",
         "btn_back": "🔙 رجوع",
-        "btn_download": "⬇️ تحميل مباشر",
-        "expired": "⚠️ انتهت صلاحية هذا الطلب، يرجى إرسال الرابط من جديد.",
-        "select_res": "🎬 **اختر دقة الفيديو لـ:**\n`{title}`\n\n⬇️ الملفات أقل من 50MB ترسل مباشرة، والأكبر ترسل كرابط.",
-        "select_audio": "🎵 **اختر الامتداد الصوتي لـ:**\n`{title}`",
-        "opt_not_found": "⚠️ هذا الخيار لم يعد متوفراً.",
-        "queue_notice": "⏳ هناك عملية جارية بالفعل على **{curr}**.\nتم وضع طلبك **{new}** في قائمة الانتظار وسيبدأ فوراً بعد انتهائها.",
-        "downloading": "⏳ **جاري معالجة وتحميل ({label})...**\nقد يستغرق بعض الوقت حسب طول المقطع.",
-        "uploading": "📤 **جاري رفع الملف إلى تيليجرام...**",
-        "download_error": "❌ **فشل التحميل.**\n`{err}`",
-        "file_not_found": "❌ لم يتم العثور على الملف بعد المعالجة.",
-        "send_error": "❌ فشل إرسال الملف عبر تيليجرام.",
-        "link_ready": "✅ **تم تجهيز رابط التحميل المباشر** — انظر الرسالة أدناه 👇",
-        "exceed_limit": "⚠️ **حجم الملف يتجاوز 50 MB** — لا يمكن إرساله كملف مباشر في تيليجرام.\nاضغط زر التحميل أدناه لبدء التنزيل بأقصى سرعة 👇",
-        "link_expire_note": "⏳ ملاحظة: الرابط صالح لفترة مؤقتة من المنصة المصدر.",
+        "btn_download": "⬇️ تحميل المقطع",
+        "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً وسأجهزه لك فوراً.",
+        "select_res": "🎬 **اختر الدقة المناسبة لك:**\n`{title}`",
+        "select_audio": "🎵 **اختر الامتداد الصوتي المناسب:**\n`{title}`",
+        "opt_not_found": "⚠️ هذا الخيار لم يعد متاحاً، أعد إرسال الرابط.",
+        "queue_notice": "⏳ جاري استكمال تحميل: **{curr}**\nوسيبدأ تلقائياً تجهيز: **{new}** فور انتهائه مباشرة.",
+        "downloading": "⏳ **جاري تجهيز وتحميل ({label})...**\nلحظات وسيكون جاهزاً لديك.",
+        "uploading": "📤 **جاري إرسال الملف إليك الآن...**",
+        "download_error": "❌ **تعذر تحميل المقطع.** يرجى تجربة جودة أخرى أو المحاولة لاحقاً.",
+        "file_not_found": "❌ حدث خطأ غير متوقع أثناء المعالجة، يرجى إعادة المحاولة.",
+        "send_error": "❌ تعذر إرسال الملف عبر المحادثة.",
+        "link_ready": "✅ **تم تجهيز رابط التحميل المباشر لك بالأسفل 👇**",
+        "exceed_limit": (
+            "📁 **نظراً لدقة المقطع العالية أو طول مدته، تم إنشاء رابط تحميل سريع ومباشر لك:**\n"
+            "اضغط على زر التحميل أدناه لبدء التنزيل فوراً 👇"
+        ),
+        "link_expire_note": "💡 يُفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
         "not_defined": "غير محدد",
         "minutes_seconds": "{m} دقيقة و {sec} ثانية",
         "hours_minutes": "{h} س {m} د {sec} ث",
     },
     "en": {
         "welcome": (
-            "👋 **Welcome {name} to the Smart Downloader Bot!**\n\n"
+            "👋 **Welcome {name} to Smart Downloader Bot!**\n"
+            "Developer: **Ahmed Hassan Abdelnaby** 👨‍💻\n\n"
             "Send any link from (YouTube, Facebook, TikTok, Instagram, X, Pinterest...)\n\n"
-            "🎯 **How it works:**\n"
-            "• If file is **< 50 MB** ⬅️ It will be sent as a media file directly.\n"
-            "• If file is **> 50 MB** ⬅️ You will get a fast direct download link button.\n\n"
-            "⚡ Fast, queue-supported, and 24/7 stable!"
+            "🎯 **Features:**\n"
+            "• Direct video & audio downloads with multiple qualities.\n"
+            "• High-speed direct download links for long media.\n\n"
+            "🚀 Send your link now to get started!"
         ),
-        "checking": "⚡ **Analyzing URL and retrieving media formats...**",
-        "fetch_error": "❌ **Failed to fetch media.** Ensure the link/account is public.",
-        "no_formats": "⚠️ No downloadable formats found for this media.",
+        "checking": "⚡ **Analyzing link and preparing options...**",
+        "fetch_error": "❌ **Failed to fetch media.** Please ensure the video or post is public.",
+        "no_formats": "⚠️ No downloadable formats found for this link.",
         "title": "📌 **Title:** `{title}`",
         "platform": "🌐 **Platform:** `{platform}`",
         "duration": "⏱ **Duration:** {duration}",
-        "choose_type": "👇 **Select download type:**",
+        "choose_type": "👇 **Select your preferred format:**",
         "btn_video": "🎬 Video",
         "btn_audio": "🎵 Audio Only",
         "btn_back": "🔙 Back",
-        "btn_download": "⬇️ Direct Download",
-        "expired": "⚠️ Session expired, please send the link again.",
-        "select_res": "🎬 **Select video resolution for:**\n`{title}`\n\n⬇️ Files < 50MB are sent directly, larger ones via link.",
-        "select_audio": "🎵 **Select audio format for:**\n`{title}`",
-        "opt_not_found": "⚠️ Option no longer available.",
-        "queue_notice": "⏳ A task is already running on **{curr}**.\nYour request **{new}** has been queued and will start automatically.",
-        "downloading": "⏳ **Downloading and processing ({label})...**\nPlease wait.",
-        "uploading": "📤 **Uploading to Telegram...**",
-        "download_error": "❌ **Download failed.**\n`{err}`",
-        "file_not_found": "❌ File not found after processing.",
-        "send_error": "❌ Failed to send file to Telegram.",
-        "link_ready": "✅ **Direct download link generated** — See below 👇",
-        "exceed_limit": "⚠️ **File size exceeds 50 MB** — Cannot be sent directly via Telegram.\nClick the button below to download directly 👇",
-        "link_expire_note": "⏳ Note: The link is valid for a temporary period.",
+        "btn_download": "⬇️ Download Media",
+        "expired": "⚠️ This option has expired. Please resend the link.",
+        "select_res": "🎬 **Select your preferred quality:**\n`{title}`",
+        "select_audio": "🎵 **Select audio format:**\n`{title}`",
+        "opt_not_found": "⚠️ This option is no longer available.",
+        "queue_notice": "⏳ Finishing download for: **{curr}**\n**{new}** will start automatically right after.",
+        "downloading": "⏳ **Preparing and downloading ({label})...**\nPlease wait.",
+        "uploading": "📤 **Sending file to you now...**",
+        "download_error": "❌ **Failed to download media.** Please try another quality or try again later.",
+        "file_not_found": "❌ An error occurred during processing. Please try again.",
+        "send_error": "❌ Failed to send file.",
+        "link_ready": "✅ **Direct download link is ready below 👇**",
+        "exceed_limit": (
+            "📁 **Due to high quality or length, a fast direct download link was generated for you:**\n"
+            "Click the download button below to start downloading directly 👇"
+        ),
+        "link_expire_note": "💡 It is recommended to download now to save it to your device.",
         "not_defined": "Undefined",
         "minutes_seconds": "{m}m {sec}s",
         "hours_minutes": "{h}h {m}m {sec}s",
@@ -168,7 +176,7 @@ def t(update: Update, key: str, **kwargs) -> str:
         return text.format(**kwargs)
     return text
 
-# ==================== دوال المساعدة ====================
+# ==================== دوال مساعدة ====================
 def format_size(bytes_val) -> str:
     if not bytes_val:
         return ""
@@ -349,7 +357,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "time": time.time(),
     }
 
-    # تنظيف الكاش القديم إن زاد عن 500 عنصر
     if len(MEDIA_CACHE) > 500:
         oldest = sorted(MEDIA_CACHE.keys(), key=lambda k: MEDIA_CACHE[k]["time"])[:100]
         for k in oldest:
@@ -374,25 +381,16 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== إرسال رابط التحميل المباشر ====================
 async def send_download_link(query, update: Update, media: dict, option: dict, label: str, mode: str, predicted_size: int):
     direct_url = None
-    quality_note = ""
 
     if mode == "audio":
         direct_url = option.get("direct_url")
-        quality_note = f"🎧 Format: **{label}**"
     elif mode == "video":
         if option.get("single_url"):
             direct_url = option["single_url"]
-            quality_note = "✅ Direct link (Video + Audio)"
         else:
             bp = media.get("best_progressive")
-            sel_h = option.get("height") or 0
             if bp and bp.get("url"):
                 direct_url = bp["url"]
-                bp_h = bp.get("height", 0)
-                if bp_h > 0 and sel_h > bp_h:
-                    quality_note = f"⚠️ Selected {label} is video-only.\n✅ Highest direct with sound: {bp_h}p"
-                else:
-                    quality_note = f"✅ Quality: {bp_h}p (Video + Audio)"
 
     if not direct_url:
         direct_url = media["webpage_url"]
@@ -405,8 +403,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         f"{t(update, 'title', title=title_short)}\n"
         f"{t(update, 'platform', platform=media.get('platform', 'Web'))}\n"
         f"{t(update, 'duration', duration=format_duration_str(media.get('duration', 0), update))}\n"
-        f"🎯 Quality: {label}{size_str}\n"
-        f"\n{quality_note}\n\n"
+        f"🎯 **الجودة:** {label}{size_str}\n\n"
         f"{t(update, 'exceed_limit')}\n\n"
         f"{t(update, 'link_expire_note')}"
     )
@@ -427,7 +424,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         disable_web_page_preview=not is_webpage,
     )
 
-# ==================== طابور التنزيل للمستخدم ====================
+# ==================== معالجة طابور المستخدم المتتابع ====================
 async def user_download_worker(user_id: int):
     q = USER_TASK_QUEUES[user_id]
     while True:
@@ -461,12 +458,12 @@ async def enqueue_download(query, update: Update, media: dict, mode: str, label:
 
     if user_id in USER_CURRENT_TASK:
         curr = USER_CURRENT_TASK[user_id]
-        new_task = f"{label} - {media.get('title', 'media')[:25]}..."
+        new_task = f"{label} ({media.get('title', 'media')[:25]}...)"
         await query.message.reply_text(t(update, "queue_notice", curr=curr, new=new_task), parse_mode="Markdown")
 
     await USER_TASK_QUEUES[user_id].put((query, update, media, mode, label, option))
 
-# ==================== التحميل والإرسال الفعلي ====================
+# ==================== التحميل الفعلي والإرسال ====================
 async def perform_download_and_send(query, update: Update, media: dict, mode: str, label: str, option: dict):
     est = estimate_size(option, media, mode)
     should_download = False
@@ -541,7 +538,7 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         except Exception as e:
             logger.error(f"Download error: {e}")
             if status:
-                await status.edit_text(t(update, "download_error", err=str(e)[:180]), parse_mode="Markdown")
+                await status.edit_text(t(update, "download_error"), parse_mode="Markdown")
             return
 
     if not filepath or not os.path.exists(filepath):
@@ -572,9 +569,9 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
     title = media.get("title") or "media"
     caption = f"📥 {title[:200]}"
     if mode == "video" and label != "أفضل دقة متاحة":
-        caption += f"\n🖥 Resolution: {label}"
+        caption += f"\n🖥 الدقة: {label}"
     elif mode == "audio":
-        caption += f"\n🎵 Format: {label}"
+        caption += f"\n🎵 الصيغة: {label}"
 
     try:
         with open(filepath, "rb") as fh:
@@ -604,13 +601,13 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         except Exception:
             pass
 
-# ==================== معالج الأزرار التفاعلية ====================
+# ==================== معالج الأزرار ====================
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    # 1) استعراض الفيديو: sv:{media_id}
+    # 1) استعراض خيارات الفيديو: sv:{media_id}
     if data.startswith("sv:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -635,7 +632,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 2) استعراض الصوت: sa:{media_id}
+    # 2) استعراض خيارات الصوت: sa:{media_id}
     elif data.startswith("sa:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -655,7 +652,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 3) طلب تحميل فيديو: rv:{media_id}:{label}
+    # 3) طلب تحميل جودة فيديو: rv:{media_id}:{label}
     elif data.startswith("rv:"):
         _, mid, label = data.split(":", 2)
         media = MEDIA_CACHE.get(mid)
@@ -668,7 +665,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await enqueue_download(query, update, media, mode="video", label=label, option=option)
 
-    # 4) طلب تحميل صوت: ra:{media_id}:{label}
+    # 4) طلب تحميل صيغة صوت: ra:{media_id}:{label}
     elif data.startswith("ra:"):
         _, mid, label = data.split(":", 2)
         media = MEDIA_CACHE.get(mid)
@@ -698,7 +695,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== التشغيل ====================
 async def on_startup(app):
     check_ffmpeg()
-    print("🚀 تم تشغيل بوت التحميل الذكي بأقصى أداء وتزامن!")
+    print("🚀 تم تشغيل بوت التحميل الذكي بأقصى أداء وتجربة مستخدم نقية!")
 
 async def on_shutdown(app):
     for worker in USER_WORKERS.values():
@@ -706,7 +703,7 @@ async def on_shutdown(app):
 
 def main():
     if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN غير موجود! تأكد من وضعه في Secrets أو متغيرات البيئة.")
+        raise ValueError("BOT_TOKEN غير موجود! تأكد من وضعه في Secrets.")
 
     app = (
         ApplicationBuilder()
