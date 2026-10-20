@@ -10,6 +10,13 @@ import time
 from typing import Dict, Any, Optional
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+# دعم زر النسخ المباشر إلى الحافظة من تيليجرام
+try:
+    from telegram import CopyTextButton
+except ImportError:
+    CopyTextButton = None
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -41,6 +48,20 @@ def check_ffmpeg() -> bool:
     logger.warning("⚠️ FFmpeg غير مثبت.")
     return False
 
+# ==================== التحقق من الكوكيز ====================
+COOKIE_FILE = None
+local_cookie = os.path.join(BASE_DIR, "cookies.txt")
+if os.path.isfile(local_cookie):
+    COOKIE_FILE = local_cookie
+elif os.environ.get("YTDL_COOKIES"):
+    temp_cookie_path = os.path.join(tempfile.gettempdir(), "cookies.txt")
+    try:
+        with open(temp_cookie_path, "w", encoding="utf-8") as f:
+            f.write(os.environ["YTDL_COOKIES"])
+        COOKIE_FILE = temp_cookie_path
+    except Exception as e:
+        logger.warning(f"Could not write cookie file: {e}")
+
 # ==================== إعدادات التحميل ====================
 DOWNLOAD_DIR = os.path.join(tempfile.gettempdir(), "tg_media_bot")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -53,6 +74,7 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# خيارات جلب البيانات المتقدمة لتخطي قيود يوتيوب وباقي المنصات
 YTDL_INFO_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -60,7 +82,17 @@ YTDL_INFO_OPTS = {
     "noplaylist": True,
     "user_agent": USER_AGENT,
     "nocheckcertificate": True,
+    "geo_bypass": True,
+    "ignoreerrors": False,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "ios", "mweb", "web"],
+            "player_skip": ["configs"],
+        }
+    },
 }
+if COOKIE_FILE:
+    YTDL_INFO_OPTS["cookiefile"] = COOKIE_FILE
 
 # ==================== إدارة الذاكرة والعمليات ====================
 MEDIA_CACHE: Dict[str, dict] = {}
@@ -77,7 +109,7 @@ def get_download_semaphore():
         GLOBAL_DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
     return GLOBAL_DOWNLOAD_SEMAPHORE
 
-# ==================== قاموس النصوص (تجربة مستخدم راقية ونظيفة) ====================
+# ==================== قاموس النصوص ====================
 I18N = {
     "ar": {
         "welcome": (
@@ -100,6 +132,7 @@ I18N = {
         "btn_audio": "🎵 صوت فقط",
         "btn_back": "🔙 رجوع",
         "btn_download": "⬇️ تحميل المقطع",
+        "btn_copy": "📋 نسخ الرابط",
         "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً وسأجهزه لك فوراً.",
         "select_res": "🎬 **اختر الدقة المناسبة لك:**\n`{title}`",
         "select_audio": "🎵 **اختر الامتداد الصوتي المناسب:**\n`{title}`",
@@ -113,7 +146,7 @@ I18N = {
         "link_ready": "✅ **تم تجهيز رابط التحميل المباشر لك بالأسفل 👇**",
         "exceed_limit": (
             "📁 **نظراً لدقة المقطع العالية أو طول مدته، تم إنشاء رابط تحميل سريع ومباشر لك:**\n"
-            "اضغط على زر التحميل أدناه لبدء التنزيل فوراً 👇"
+            "اضغط على زر التحميل أدناه لبدء التنزيل أو زر النسخ للحفظ عندك 👇"
         ),
         "link_expire_note": "💡 يُفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
         "not_defined": "غير محدد",
@@ -141,6 +174,7 @@ I18N = {
         "btn_audio": "🎵 Audio Only",
         "btn_back": "🔙 Back",
         "btn_download": "⬇️ Download Media",
+        "btn_copy": "📋 Copy Link",
         "expired": "⚠️ This option has expired. Please resend the link.",
         "select_res": "🎬 **Select your preferred quality:**\n`{title}`",
         "select_audio": "🎵 **Select audio format:**\n`{title}`",
@@ -154,7 +188,7 @@ I18N = {
         "link_ready": "✅ **Direct download link is ready below 👇**",
         "exceed_limit": (
             "📁 **Due to high quality or length, a fast direct download link was generated for you:**\n"
-            "Click the download button below to start downloading directly 👇"
+            "Click download below to start or copy button to copy the link 👇"
         ),
         "link_expire_note": "💡 It is recommended to download now to save it to your device.",
         "not_defined": "Undefined",
@@ -329,9 +363,33 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_url = url_match.group(1)
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
+    # آلية استخراج ذكية متعددة المسارات والمحاولات لتخطي كافة أنواع الحظر
     def fetch():
-        with yt_dlp.YoutubeDL(YTDL_INFO_OPTS) as ydl:
-            return ydl.extract_info(target_url, download=False)
+        strategies = [
+            {"extractor_args": {"youtube": {"player_client": ["android", "ios", "mweb"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["ios", "mweb", "web"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["tv", "mweb"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["web"]}}},
+            {}
+        ]
+        last_exception = None
+        for strat in strategies:
+            opts = dict(YTDL_INFO_OPTS)
+            opts.update(strat)
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    data = ydl.extract_info(target_url, download=False)
+                    if data:
+                        # دعم الروابط التي ترجع مصفوفة مقاطع كصفحات انستغرام وتيك توك
+                        if "entries" in data and data["entries"]:
+                            for entry in data["entries"]:
+                                if entry:
+                                    return entry
+                        return data
+            except Exception as err:
+                last_exception = err
+                continue
+        raise last_exception or Exception("Failed to fetch info")
 
     try:
         info = await asyncio.to_thread(fetch)
@@ -347,6 +405,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     media_id = uuid.uuid4().hex[:8]
     MEDIA_CACHE[media_id] = {
+        "id": media_id,
         "title": info.get("title", "media"),
         "platform": info.get("extractor_key", "Web"),
         "duration": info.get("duration", 0),
@@ -378,7 +437,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
-# ==================== إرسال رابط التحميل المباشر ====================
+# ==================== إرسال رابط التحميل المباشر مع زر النسخ ====================
 async def send_download_link(query, update: Update, media: dict, option: dict, label: str, mode: str, predicted_size: int):
     direct_url = None
 
@@ -395,6 +454,9 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
     if not direct_url:
         direct_url = media["webpage_url"]
 
+    media["last_direct_url"] = direct_url
+    mid = media.get("id", "")
+
     is_webpage = (direct_url == media["webpage_url"])
     size_str = format_size(predicted_size) if predicted_size else ""
     title_short = (media.get("title") or "media")[:70]
@@ -405,12 +467,29 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         f"{t(update, 'duration', duration=format_duration_str(media.get('duration', 0), update))}\n"
         f"🎯 **الجودة:** {label}{size_str}\n\n"
         f"{t(update, 'exceed_limit')}\n\n"
+        f"🔗 **رابط التحميل المباشر:**\n`{direct_url}`\n\n"
         f"{t(update, 'link_expire_note')}"
     )
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(t(update, "btn_download"), url=direct_url)]
-    ])
+    # بناء أزرار التحميل ونسخ الرابط
+    action_buttons = [InlineKeyboardButton(t(update, "btn_download"), url=direct_url)]
+
+    if CopyTextButton:
+        try:
+            action_buttons.append(
+                InlineKeyboardButton(t(update, "btn_copy"), copy_text=CopyTextButton(text=direct_url))
+            )
+        except Exception:
+            if mid:
+                action_buttons.append(
+                    InlineKeyboardButton(t(update, "btn_copy"), callback_data=f"cp:{mid}")
+                )
+    elif mid:
+        action_buttons.append(
+            InlineKeyboardButton(t(update, "btn_copy"), callback_data=f"cp:{mid}")
+        )
+
+    keyboard = InlineKeyboardMarkup([action_buttons])
 
     try:
         await query.edit_message_text(t(update, "link_ready"), parse_mode="Markdown")
@@ -506,14 +585,23 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         "no_warnings": True,
         "noplaylist": True,
         "nocheckcertificate": True,
+        "geo_bypass": True,
         "outtmpl": outtmpl,
         "format": format_selector,
         "merge_output_format": "mp4",
         "user_agent": USER_AGENT,
-        "retries": 3,
-        "fragment_retries": 3,
+        "retries": 5,
+        "fragment_retries": 5,
         "concurrent_fragment_downloads": 4,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "mweb", "web"],
+                "player_skip": ["configs"],
+            }
+        },
     }
+    if COOKIE_FILE:
+        ydl_opts["cookiefile"] = COOKIE_FILE
 
     def do_download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -691,6 +779,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{t(update, 'choose_type')}"
         )
         await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    # 6) نسخ الرابط (للأجهزة والأنظمة التي لا تدعم النسخ المباشر من الزر)
+    elif data.startswith("cp:"):
+        mid = data[3:]
+        media = MEDIA_CACHE.get(mid)
+        target_link = media.get("last_direct_url") or (media.get("webpage_url") if media else "")
+        if target_link:
+            await query.answer("📋 اضغط مطولاً على الرابط لنسخه!")
+            await query.message.reply_text(
+                f"📋 **اضغط على الرابط بالأسفل لنسخه بنقرة واحدة:**\n`{target_link}`",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.answer(t(update, "expired"))
 
 # ==================== التشغيل ====================
 async def on_startup(app):
