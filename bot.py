@@ -32,13 +32,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== إعدادات التوكن والقناة ====================
+# ==================== إعدادات التوكن والقناة الرسمية ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# ضع يوزر قناتك هنا مع علامة @ أو المعرف الرقمي -100xxx (أو ضعه في Secrets)
+# تم ضبط قناتك هنا مباشرة بشكل ثابت ورسمي:
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "@Basira_Tech")
-# رابط الانضمام لقناتك ليظهر في الزر
-CHANNEL_URL = os.environ.get("CHANNEL_URL", "https://t.me/YourChannelUsername")
+CHANNEL_URL = os.environ.get("CHANNEL_URL", "https://t.me/Basira_Tech")
 
 # ==================== التحقق من FFmpeg ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -143,7 +142,7 @@ I18N = {
         "btn_back": "🔙 رجوع",
         "btn_download": "⬇️ تحميل المقطع",
         "btn_copy": "📋 نسخ الرابط",
-        "btn_join": "📢 الانضمام إلى القناة",
+        "btn_join": "📢 الانضمام إلى قناة Basira Tech",
         "btn_verify_sub": "🔄 تحقق من الاشتراك",
         "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً.",
         "select_res": "🎬 **اختر الدقة المطلوبة:**\n`{title}`",
@@ -203,7 +202,7 @@ I18N = {
         "btn_back": "🔙 Back",
         "btn_download": "⬇️ Download Media",
         "btn_copy": "📋 Copy Link",
-        "btn_join": "📢 Join Channel",
+        "btn_join": "📢 Join Basira Tech Channel",
         "btn_verify_sub": "🔄 Check Subscription",
         "expired": "⚠️ This option has expired. Please resend the link.",
         "select_res": "🎬 **Select resolution:**\n`{title}`",
@@ -248,8 +247,8 @@ def t(update: Update, key: str, **kwargs) -> str:
 
 # ==================== التحقق الصارم من الاشتراك الإجباري ====================
 async def check_user_subscription(bot, user_id: int) -> bool:
-    """التحقق في كل طلب من أن المستخدم عضو في القناة"""
-    if not REQUIRED_CHANNEL or REQUIRED_CHANNEL == "@YourChannelUsername":
+    """التحقق في كل طلب من أن المستخدم عضو في قناة @Basira_Tech"""
+    if not REQUIRED_CHANNEL:
         return True
     try:
         member = await bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
@@ -258,7 +257,6 @@ async def check_user_subscription(bot, user_id: int) -> bool:
         return False
     except Exception as e:
         logger.warning(f"Subscription check warning for {user_id}: {e}")
-        # إذا كان المعرف غير مضبوط بعد أو البوت ليس مشرفاً نسمح بالمرور منعاً لتعطل البوت
         return False
 
 def get_sub_markup(update: Update) -> InlineKeyboardMarkup:
@@ -524,19 +522,16 @@ def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 
         dur_compact = format_duration_compact(dur_raw)
         uploader = e.get("uploader") or e.get("channel") or "Unknown"
 
-        # إضافة معلومات المقطع بالتفصيل في الرسالة
         items_text_list.append(
             f"🔹 **{idx+1}.** `{title[:55]}`\n"
             f"   ⏱ **المدة:** {dur_compact}  |  👤 **الناشر:** `{uploader[:25]}`\n"
         )
 
-        # الزر يحتوي على رقم المقطع + عنوانه + المدة
         btn_label = f"{idx+1}. {title[:22]} ⏱{dur_compact}"
         keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"ple:{pl_id}:{idx}")])
 
     full_text = header + "\n".join(items_text_list)
 
-    # أزرار التنقل بين الصفحات
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("➡️ السابق", callback_data=f"plp:{pl_id}:{page-1}"))
@@ -550,7 +545,6 @@ def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 
 # ==================== أوامر ومعالجات البوت ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # التحقق من الاشتراك عند البدء
     if not await check_user_subscription(context.bot, user_id):
         await require_subscription_prompt(update, context)
         return
@@ -599,7 +593,6 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
         return
 
-    # فحص ما إذا كان الرابط يمثل قائمة تشغيل
     is_playlist = (
         info.get("_type") == "playlist"
         or ("entries" in info and isinstance(info["entries"], (list, type((x for x in [])))))
@@ -628,7 +621,6 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         )
         return
 
-    # مقطع فردي
     video_opts, audio_fmts, best_prog = parse_media_data(info)
     if not video_opts and not audio_fmts:
         await status_msg.edit_text(t(update, "no_formats"))
@@ -671,7 +663,6 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # التحقق الحازم عند كل رسالة يتم إرسالها
     if not await check_user_subscription(context.bot, user_id):
         await require_subscription_prompt(update, context)
         return
@@ -957,7 +948,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_name = query.from_user.first_name or "صديقي"
             await query.edit_message_text(t(update, "welcome", name=user_name), parse_mode="Markdown")
         else:
-            await query.answer("❌ ما زلت غير منضم للقناة! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
+            await query.answer("❌ ما زلت غير منضم لقناة Basira Tech! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
         return
 
     # التحقق من الاشتراك قبل تنفيذ أي نقرة زر أخرى
@@ -1131,7 +1122,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== التشغيل ====================
 async def on_startup(app):
     check_ffmpeg()
-    print("🚀 تم تشغيل البوت بنجاح مع تفعيل التحقق الصارم من الاشتراك ودعم قوائم التشغيل المفصلة!")
+    print("🚀 تم تشغيل البوت بنجاح وربطه بقناة @Basira_Tech الرسمية!")
 
 async def on_shutdown(app):
     for worker in USER_WORKERS.values():
