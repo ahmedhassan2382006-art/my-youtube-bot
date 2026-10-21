@@ -74,19 +74,26 @@ SAFE_DOWNLOAD_THRESHOLD = 46 * 1024 * 1024
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 )
 
-YTDL_INFO_OPTS = {
+# الإعدادات الأساسية الشاملة لتجاوز الحجب في كافة المنصات
+BASE_YTDL_OPTS = {
     "quiet": True,
     "no_warnings": True,
-    "skip_download": True,
     "nocheckcertificate": True,
     "geo_bypass": True,
     "ignoreerrors": False,
+    "socket_timeout": 15,
+    "http_headers": {
+        "User-Agent": USER_AGENT,
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+        "Accept": "*/*",
+    },
 }
+
 if COOKIE_FILE:
-    YTDL_INFO_OPTS["cookiefile"] = COOKIE_FILE
+    BASE_YTDL_OPTS["cookiefile"] = COOKIE_FILE
 
 # ==================== إدارة الذاكرة والعمليات ====================
 MEDIA_CACHE: Dict[str, dict] = {}
@@ -121,11 +128,11 @@ I18N = {
         "sub_required": (
             "⚠️ **عذراً، يجب عليك الانضمام إلى قناتنا أولاً لاستخدام البوت!**\n\n"
             "📢 **قناة Basira Tech:**\n"
-            "قناة مخصصة لنشر ومشاركة مشاريعنا البرمجية القادمة (برامج كمبيوتر، تطبيقات أندرويد، بوتات وأدوات تقنية).\n\n"
-            "انضم إلينا لتصلك مشاريعنا وتحديثاتها أولاً بأول 👇"
+            "قناة مخصصة لنشر ومشاركة مشاريعنا البرمجية القادمة.\n\n"
+            "انضم إلينا لتصلك مشاريعنا أولاً بأول 👇"
         ),
-        "checking": "🔍 **جاري فحص الرابط وتجهيز الخيارات...**",
-        "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للجميع وليس خاصاً.",
+        "checking": "🔍 **جاري فحص الرابط وتجهيز الخيارات بأفضل جودة...**",
+        "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للعامة وليس خاصاً أو محظوراً جغرافياً.",
         "no_formats": "⚠️ لم يتم العثور على صيغ قابلة للتحميل لهذا المقطع.",
         "title": "📌 **العنوان:** `{title}`",
         "platform": "🌐 **المنصة:** `{platform}`",
@@ -169,18 +176,9 @@ I18N = {
             "👋 **Welcome {name} to Downloader Bot!**\n"
             "Developer: **Ahmed Hassan Abdelnaby** 👨‍💻\n\n"
             "Send any link or playlist from (YouTube, Facebook, TikTok, Instagram, X...)\n\n"
-            "🎯 **Features:**\n"
-            "• Direct video & audio downloads.\n"
-            "• Fast direct links for media exceeding 50MB.\n"
-            "• Playlist browser with detailed video metadata.\n\n"
             "Send your link to start 🚀"
         ),
-        "sub_required": (
-            "⚠️ **You must join our channel to use the bot!**\n\n"
-            "📢 **Basira Tech Channel:**\n"
-            "A channel dedicated to publishing our upcoming software projects, desktop apps, Android apps, and bots.\n\n"
-            "Join us to stay updated with all our releases 👇"
-        ),
+        "sub_required": "⚠️ **You must join our channel to use the bot!**",
         "checking": "🔍 **Analyzing link and preparing options...**",
         "fetch_error": "❌ **Failed to fetch media.** Please ensure the link is public.",
         "no_formats": "⚠️ No downloadable formats found for this link.",
@@ -206,20 +204,12 @@ I18N = {
         "file_not_found": "❌ An error occurred during processing.",
         "send_error": "❌ Failed to send file.",
         "link_ready": "✅ **Direct download link is ready below 👇**",
-        "exceed_limit": (
-            "📁 **Due to exceeding Telegram's 50MB limit, a direct link was generated:**\n"
-            "Click download below to start or copy to save it 👇"
-        ),
+        "exceed_limit": "📁 **Due to exceeding 50MB, a direct link was generated:**",
         "link_expire_note": "💡 You can start downloading now to save it to your device.",
         "not_defined": "Undefined",
         "minutes_seconds": "{m}m {sec}s",
         "hours_minutes": "{h}h {m}m {sec}s",
-        "playlist_header": (
-            "📋 **Playlist:** `{title}`\n"
-            "🌐 **Platform:** `{platform}`\n"
-            "🔢 **Total Videos:** {count} | 📄 **Page:** {page}/{total_pages}\n\n"
-            "👇 **Videos list on this page:**\n"
-        ),
+        "playlist_header": "📋 **Playlist:** `{title}` | 📄 **Page:** {page}/{total_pages}",
     }
 }
 
@@ -236,37 +226,25 @@ def t(update: Update, key: str, **kwargs) -> str:
         return text.format(**kwargs)
     return text
 
-# ==================== التحقق الدقيق من الاشتراك الإجباري ====================
+# ==================== التحقق من الاشتراك الإجباري ====================
 async def check_user_subscription(bot, user_id: int):
-    """
-    التحقق من اشتراك المستخدم
-    يعيد: (is_subscribed: bool, admin_error: Optional[str])
-    """
     if not REQUIRED_CHANNEL:
         return True, None
     try:
         member = await bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
-        
         status = str(getattr(member, "status", "")).lower()
         if "." in status:
             status = status.split(".")[-1]
             
-        logger.info(f"User {user_id} channel status: '{status}'")
-
-        # يشمل المالك (creator / owner)، المشرفين، الأعضاء العاديين
         if status in ("creator", "administrator", "member", "restricted", "owner"):
             return True, None
             
         return False, None
     except Exception as e:
         err_msg = str(e).lower()
-        logger.error(f"Subscription verification error for user {user_id}: {e}")
-        
-        # إذا كان السبب نقص صلاحية البوت في القناة
         if any(keyword in err_msg for keyword in ("chat not found", "bot is not a member", "not enough rights", "admin")):
             note = "⚠️ تنبيه للمسؤول: البوت ليس مشرفاً (Admin) داخل القناة @Basira_Tech! يجب إضافته كأدمن حتى يستطيع التحقق."
             return False, note
-            
         return False, None
 
 def get_sub_markup(update: Update) -> InlineKeyboardMarkup:
@@ -290,7 +268,33 @@ async def require_subscription_prompt(update: Update, context: ContextTypes.DEFA
         except Exception:
             pass
 
-# ==================== دوال مساعدة ====================
+# ==================== دوال تنظيف وفك الروابط الذكية ====================
+def clean_and_sanitize_url(raw_url: str) -> str:
+    """تنظيف الرابط من الشوائب وعلامات الترقيم في نهايته"""
+    url = raw_url.strip()
+    url = re.sub(r'[\.,\?!:;\)\]}>]+$', '', url)
+    return url
+
+def resolve_short_url(url: str) -> str:
+    """فك روابط الاختصار الخارجية دون العبث بروابط المنصات الرسمية"""
+    # لا تلمس روابط يوتيوب أو تيك توك أو فيسبوك لأن yt-dlp يفهمها مباشرة
+    # وأي محاولة urllib لفتحها ستحولها لصفحة Consent/Captcha!
+    native_domains = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch", "x.com", "twitter.com")
+    if any(domain in url.lower() for domain in native_domains):
+        return url
+
+    # إذا كان رابط اختصار عام مثل bit.ly, tinyurl, t.co
+    if any(shortener in url.lower() for shortener in ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly")):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                final_url = resp.geturl()
+                if final_url and "consent" not in final_url:
+                    return final_url
+        except Exception:
+            pass
+    return url
+
 def format_size(bytes_val) -> str:
     if not bytes_val:
         return ""
@@ -326,22 +330,6 @@ def format_duration_compact(seconds) -> str:
         return f"{m:02d}:{sec:02d}"
     except Exception:
         return "--:--"
-
-def unshorten_url(url: str) -> str:
-    clean_url = url.strip()
-    if any(dom in clean_url for dom in ("tiktok.com", "fb.watch", "facebook.com", "youtu.be")):
-        try:
-            req = urllib.request.Request(
-                clean_url,
-                headers={"User-Agent": USER_AGENT}
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                resolved = resp.geturl()
-                if resolved:
-                    return resolved
-        except Exception:
-            pass
-    return clean_url
 
 # ==================== تحليل بيانات المقطع ====================
 def parse_media_data(info: Dict[str, Any]):
@@ -568,37 +556,57 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def process_single_link(target_url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target_url = unshorten_url(target_url)
+    target_url = clean_and_sanitize_url(target_url)
+    target_url = resolve_short_url(target_url)
+    
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
     def fetch():
-        is_youtube = any(d in target_url for d in ("youtube.com", "youtu.be"))
-        if is_youtube:
+        is_yt = any(d in target_url for d in ("youtube.com", "youtu.be"))
+
+        # استراتيجيات متعددة لتخطي أي حظر من يوتيوب وباقي المنصات
+        if is_yt:
             strategies = [
-                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["android", "ios", "mweb"]}}},
-                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["ios", "mweb", "web"]}}},
-                {},
+                # الاستراتيجية الأقوى حالياً: الجمع بين عميل iOS وعميل الشاشات والويب
+                {
+                    "extractor_args": {
+                        "youtube": {
+                            "player_client": ["ios", "mweb", "tv_embedded"],
+                            "player_skip": ["configs"],
+                        }
+                    }
+                },
+                # الاستراتيجية البديلة 1: عميل الويب الموسع
+                {
+                    "extractor_args": {
+                        "youtube": {
+                            "player_client": ["web_embedded", "mweb"],
+                        }
+                    }
+                },
+                # الاستراتيجية الافتراضية
+                {}
             ]
         else:
-            strategies = [
-                {},
-                {"user_agent": USER_AGENT},
-            ]
+            strategies = [{}]
 
-        last_exception = None
+        last_err = None
         for strat in strategies:
-            opts = dict(YTDL_INFO_OPTS)
+            opts = dict(BASE_YTDL_OPTS)
             opts.update(strat)
             opts["extract_flat"] = "in_playlist"
+            opts["skip_download"] = True
+
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    data = ydl.extract_info(target_url, download=False)
-                    if data:
-                        return data
-            except Exception as err:
-                last_exception = err
+                    info = ydl.extract_info(target_url, download=False)
+                    if info:
+                        return info
+            except Exception as e:
+                last_err = e
                 continue
-        raise last_exception or Exception("Failed to fetch info")
+
+        raise last_err or Exception("Unknown extract error")
 
     try:
         info = await asyncio.to_thread(fetch)
@@ -838,28 +846,22 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
     base_name = f"{user_id}_{uuid.uuid4().hex[:8]}"
     outtmpl = os.path.join(DOWNLOAD_DIR, f"{base_name}.%(ext)s")
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+    ydl_opts = dict(BASE_YTDL_OPTS)
+    ydl_opts.update({
         "noplaylist": True,
-        "nocheckcertificate": True,
-        "geo_bypass": True,
         "outtmpl": outtmpl,
         "format": format_selector,
         "merge_output_format": "mp4",
         "retries": 5,
         "fragment_retries": 5,
         "concurrent_fragment_downloads": 4,
-    }
-    if COOKIE_FILE:
-        ydl_opts["cookiefile"] = COOKIE_FILE
+    })
 
     is_youtube = any(d in media["webpage_url"] for d in ("youtube.com", "youtu.be"))
     if is_youtube:
-        ydl_opts["user_agent"] = USER_AGENT
         ydl_opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"],
+                "player_client": ["ios", "mweb", "tv_embedded"],
                 "player_skip": ["configs"],
             }
         }
@@ -956,7 +958,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    # زر التحقق من الاشتراك
     if data == "check_sub":
         is_sub, admin_err = await check_user_subscription(context.bot, user_id)
         if is_sub:
@@ -965,13 +966,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(t(update, "welcome", name=user_name), parse_mode="Markdown")
         else:
             if admin_err:
-                # يظهر التنبيه للمسؤول مباشرة لمعرفة المشكلة
                 await query.answer(admin_err, show_alert=True)
             else:
                 await query.answer("❌ ما زلت غير منضم لقناة Basira Tech! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
         return
 
-    # التحقق من الاشتراك قبل تنفيذ أي زر آخر
     is_sub, admin_err = await check_user_subscription(context.bot, user_id)
     if not is_sub:
         await query.answer("⚠️ لا يمكنك الاستمرار دون الاشتراك في القناة!", show_alert=True)
@@ -1091,8 +1090,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(t(update, "checking"), parse_mode="Markdown")
 
         def fetch_entry():
-            opts = dict(YTDL_INFO_OPTS)
+            opts = dict(BASE_YTDL_OPTS)
             opts["extract_flat"] = False
+            opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["ios", "mweb", "tv_embedded"],
+                    "player_skip": ["configs"],
+                }
+            }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(target_url, download=False)
 
