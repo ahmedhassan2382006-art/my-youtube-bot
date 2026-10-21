@@ -12,7 +12,6 @@ from typing import Dict, Any, Optional
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-# دعم زر النسخ المباشر إلى الحافظة من تيليجرام
 try:
     from telegram import CopyTextButton
 except ImportError:
@@ -35,7 +34,6 @@ logger = logging.getLogger(__name__)
 # ==================== إعدادات التوكن والقناة الرسمية ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# تم ضبط قناتك هنا مباشرة بشكل ثابت ورسمي:
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "@Basira_Tech")
 CHANNEL_URL = os.environ.get("CHANNEL_URL", "https://t.me/Basira_Tech")
 
@@ -122,13 +120,9 @@ I18N = {
         ),
         "sub_required": (
             "⚠️ **عذراً، يجب عليك الانضمام إلى قناتنا أولاً لاستخدام البوت!**\n\n"
-            "🚀 **لماذا عليك الانضمام لقناتنا؟**\n"
-            "قناتنا هي مجتمعك التقني المتكامل لمتابعة أقوى المشاريع والأفكار:\n"
-            "✨ **برامج ويندوز (Windows):** أدوات حصرية لتسهيل مهامك اليومية.\n"
-            "📱 **تطبيقات أندرويد (Android):** مشاريع وتطبيقات مميزة ومجانية.\n"
-            "🤖 **بوتات تيليجرام:** بوتات خدمية وأدوات متطورة تفيدك دائماً.\n"
-            "💡 **شروحات وتقنية:** كل جديد في عالم البرمجة والذكاء الاصطناعي أولاً بأول!\n\n"
-            "👇 **اشترك الآن عبر الزر أدناه ثم اضغط 'تحقق من الاشتراك':**"
+            "📢 **قناة Basira Tech:**\n"
+            "قناة مخصصة لنشر ومشاركة مشاريعنا البرمجية القادمة (برامج كمبيوتر، تطبيقات أندرويد، بوتات وأدوات تقنية).\n\n"
+            "انضم إلينا لتصلك مشاريعنا وتحديثاتها أولاً بأول 👇"
         ),
         "checking": "🔍 **جاري فحص الرابط وتجهيز الخيارات...**",
         "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للجميع وليس خاصاً.",
@@ -156,8 +150,8 @@ I18N = {
         "send_error": "❌ تعذر إرسال الملف عبر المحادثة.",
         "link_ready": "✅ **تم تجهيز رابط التحميل بالأسفل 👇**",
         "exceed_limit": (
-            "📁 **نظراً لدقة المقطع العالية أو طول مدته وتجاوزه حد تيليجرام (50MB)، تم إنشاء رابط تحميل مباشر:**\n"
-            "اضغط على زر التحميل أدناه للتنزيل المباشر أو زر النسخ للحفظ عندك 👇"
+            "📁 **نظراً لتجاوز الملف حد تيليجرام (50MB)، تم إنشاء رابط تحميل مباشر لك:**\n"
+            "اضغط على زر التحميل للتنزيل أو زر النسخ للحفظ عندك 👇"
         ),
         "link_expire_note": "💡 يفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
         "not_defined": "غير محدد",
@@ -182,13 +176,10 @@ I18N = {
             "Send your link to start 🚀"
         ),
         "sub_required": (
-            "⚠️ **You must join our official channel to use the bot!**\n\n"
-            "🚀 **Why should you join?**\n"
-            "• Exclusive Windows software and tools.\n"
-            "• Useful Android apps and projects.\n"
-            "• Powerful Telegram bots and utilities.\n"
-            "• Latest tech news, AI tools, and programming guides.\n\n"
-            "👇 **Join now using the button below then click 'Check Subscription':**"
+            "⚠️ **You must join our channel to use the bot!**\n\n"
+            "📢 **Basira Tech Channel:**\n"
+            "A channel dedicated to publishing our upcoming software projects, desktop apps, Android apps, and bots.\n\n"
+            "Join us to stay updated with all our releases 👇"
         ),
         "checking": "🔍 **Analyzing link and preparing options...**",
         "fetch_error": "❌ **Failed to fetch media.** Please ensure the link is public.",
@@ -216,7 +207,7 @@ I18N = {
         "send_error": "❌ Failed to send file.",
         "link_ready": "✅ **Direct download link is ready below 👇**",
         "exceed_limit": (
-            "📁 **Due to high quality or duration exceeding Telegram's 50MB limit, a direct link was generated:**\n"
+            "📁 **Due to exceeding Telegram's 50MB limit, a direct link was generated:**\n"
             "Click download below to start or copy to save it 👇"
         ),
         "link_expire_note": "💡 You can start downloading now to save it to your device.",
@@ -245,19 +236,38 @@ def t(update: Update, key: str, **kwargs) -> str:
         return text.format(**kwargs)
     return text
 
-# ==================== التحقق الصارم من الاشتراك الإجباري ====================
-async def check_user_subscription(bot, user_id: int) -> bool:
-    """التحقق في كل طلب من أن المستخدم عضو في قناة @Basira_Tech"""
+# ==================== التحقق الدقيق من الاشتراك الإجباري ====================
+async def check_user_subscription(bot, user_id: int):
+    """
+    التحقق من اشتراك المستخدم
+    يعيد: (is_subscribed: bool, admin_error: Optional[str])
+    """
     if not REQUIRED_CHANNEL:
-        return True
+        return True, None
     try:
         member = await bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
-        if member.status in ("creator", "administrator", "member", "restricted"):
-            return True
-        return False
+        
+        status = str(getattr(member, "status", "")).lower()
+        if "." in status:
+            status = status.split(".")[-1]
+            
+        logger.info(f"User {user_id} channel status: '{status}'")
+
+        # يشمل المالك (creator / owner)، المشرفين، الأعضاء العاديين
+        if status in ("creator", "administrator", "member", "restricted", "owner"):
+            return True, None
+            
+        return False, None
     except Exception as e:
-        logger.warning(f"Subscription check warning for {user_id}: {e}")
-        return False
+        err_msg = str(e).lower()
+        logger.error(f"Subscription verification error for user {user_id}: {e}")
+        
+        # إذا كان السبب نقص صلاحية البوت في القناة
+        if any(keyword in err_msg for keyword in ("chat not found", "bot is not a member", "not enough rights", "admin")):
+            note = "⚠️ تنبيه للمسؤول: البوت ليس مشرفاً (Admin) داخل القناة @Basira_Tech! يجب إضافته كأدمن حتى يستطيع التحقق."
+            return False, note
+            
+        return False, None
 
 def get_sub_markup(update: Update) -> InlineKeyboardMarkup:
     buttons = [
@@ -266,8 +276,11 @@ def get_sub_markup(update: Update) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
-async def require_subscription_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def require_subscription_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_err: Optional[str] = None):
     msg = t(update, "sub_required")
+    if admin_err:
+        msg += f"\n\n⚙️ **{admin_err}**"
+        
     markup = get_sub_markup(update)
     if update.message:
         await update.message.reply_text(msg, reply_markup=markup, parse_mode="Markdown")
@@ -488,7 +501,7 @@ def _build_main_keyboard(media_id: str, media: dict, update: Update):
         keyboard.append(row)
     return keyboard
 
-# ==================== بناء قائمة التشغيل مع تفاصيل كل مقطع ====================
+# ==================== بناء قائمة التشغيل ====================
 def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 5):
     pl_data = PLAYLIST_CACHE.get(pl_id)
     if not pl_data:
@@ -545,8 +558,9 @@ def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 
 # ==================== أوامر ومعالجات البوت ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not await check_user_subscription(context.bot, user_id):
-        await require_subscription_prompt(update, context)
+    is_sub, admin_err = await check_user_subscription(context.bot, user_id)
+    if not is_sub:
+        await require_subscription_prompt(update, context, admin_err)
         return
 
     user_name = update.effective_user.first_name or "صديقي"
@@ -663,8 +677,9 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    if not await check_user_subscription(context.bot, user_id):
-        await require_subscription_prompt(update, context)
+    is_sub, admin_err = await check_user_subscription(context.bot, user_id)
+    if not is_sub:
+        await require_subscription_prompt(update, context, admin_err)
         return
 
     text = update.message.text or ""
@@ -943,18 +958,24 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # زر التحقق من الاشتراك
     if data == "check_sub":
-        if await check_user_subscription(context.bot, user_id):
+        is_sub, admin_err = await check_user_subscription(context.bot, user_id)
+        if is_sub:
             await query.answer("✅ تم التحقق بنجاح! أنت الآن مشترك في القناة.", show_alert=True)
             user_name = query.from_user.first_name or "صديقي"
             await query.edit_message_text(t(update, "welcome", name=user_name), parse_mode="Markdown")
         else:
-            await query.answer("❌ ما زلت غير منضم لقناة Basira Tech! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
+            if admin_err:
+                # يظهر التنبيه للمسؤول مباشرة لمعرفة المشكلة
+                await query.answer(admin_err, show_alert=True)
+            else:
+                await query.answer("❌ ما زلت غير منضم لقناة Basira Tech! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
         return
 
-    # التحقق من الاشتراك قبل تنفيذ أي نقرة زر أخرى
-    if not await check_user_subscription(context.bot, user_id):
+    # التحقق من الاشتراك قبل تنفيذ أي زر آخر
+    is_sub, admin_err = await check_user_subscription(context.bot, user_id)
+    if not is_sub:
         await query.answer("⚠️ لا يمكنك الاستمرار دون الاشتراك في القناة!", show_alert=True)
-        await require_subscription_prompt(update, context)
+        await require_subscription_prompt(update, context, admin_err)
         return
 
     await query.answer()
