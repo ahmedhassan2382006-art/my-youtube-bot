@@ -75,12 +75,10 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-# خيارات عامة ونظيفة دون فرض ترويسات يوتيوب على باقي المنصات
 YTDL_INFO_OPTS = {
     "quiet": True,
     "no_warnings": True,
     "skip_download": True,
-    "noplaylist": True,
     "nocheckcertificate": True,
     "geo_bypass": True,
     "ignoreerrors": False,
@@ -90,6 +88,7 @@ if COOKIE_FILE:
 
 # ==================== إدارة الذاكرة والعمليات ====================
 MEDIA_CACHE: Dict[str, dict] = {}
+PLAYLIST_CACHE: Dict[str, dict] = {}
 USER_TASK_QUEUES: Dict[int, asyncio.Queue] = {}
 USER_CURRENT_TASK: Dict[int, str] = {}
 USER_WORKERS: Dict[int, asyncio.Task] = {}
@@ -104,91 +103,99 @@ def get_download_semaphore():
         GLOBAL_DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
     return GLOBAL_DOWNLOAD_SEMAPHORE
 
-# ==================== قاموس النصوص ====================
+# ==================== نصوص البوت ====================
 I18N = {
     "ar": {
         "welcome": (
-            "👋 **مرحباً بك يا {name} في بوت التحميل الذكي!**\n"
+            "👋 **مرحباً بك يا {name} في بوت التحميل!**\n"
             "المطور: **أحمد حسن عبد النبي** 👨‍💻\n\n"
-            "أرسل لي رابط أي مقطع من (يوتيوب، فيسبوك، تيك توك، إنستغرام، إكس، بنترست...)\n\n"
-            "🎯 **مميزات البوت:**\n"
-            "• إرسال المقاطع مباشرة بجودات متعددة صوت وصورة.\n"
-            "• روابط تحميل مباشرة وفائقة السرعة للمقاطع الطويلة.\n\n"
-            "🚀 أرسل الرابط الآن للبدء مباشرة!"
+            "أرسل لي رابط أي مقطع أو قائمة تشغيل من (يوتيوب، فيسبوك، تيك توك، إنستغرام، إكس، بنترست...)\n\n"
+            "🎯 **الخدمات المتاحة:**\n"
+            "• إرسال المقاطع مباشرة بجودات وصيغ صوتية متعددة.\n"
+            "• روابط تحميل مباشرة للمقاطع التي تتجاوز حجم 50 ميجابايت.\n"
+            "• استعراض وتحميل مقاطع قوائم التشغيل.\n\n"
+            "أرسل الرابط للبدء."
         ),
-        "checking": "⚡ **جاري فحص الرابط وتجهيز الخيارات...**",
+        "checking": "🔍 **جاري فحص الرابط وتجهيز الخيارات...**",
         "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للجميع وليس خاصاً.",
         "no_formats": "⚠️ لم يتم العثور على صيغ قابلة للتحميل لهذا المقطع.",
         "title": "📌 **العنوان:** `{title}`",
         "platform": "🌐 **المنصة:** `{platform}`",
         "duration": "⏱ **المدة:** {duration}",
-        "choose_type": "👇 **اختر ما يناسبك للتحميل:**",
+        "choose_type": "👇 **اختر نوع التحميل المطلوب:**",
         "btn_video": "🎬 فيديو",
         "btn_audio": "🎵 صوت فقط",
         "btn_back": "🔙 رجوع",
         "btn_download": "⬇️ تحميل المقطع",
         "btn_copy": "📋 نسخ الرابط",
-        "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً وسأجهزه لك فوراً.",
-        "select_res": "🎬 **اختر الدقة المناسبة لك:**\n`{title}`",
-        "select_audio": "🎵 **اختر الامتداد الصوتي المناسب:**\n`{title}`",
+        "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً.",
+        "select_res": "🎬 **اختر الدقة المطلوبة:**\n`{title}`",
+        "select_audio": "🎵 **اختر الامتداد الصوتي:**\n`{title}`",
         "opt_not_found": "⚠️ هذا الخيار لم يعد متاحاً، أعد إرسال الرابط.",
-        "queue_notice": "⏳ جاري استكمال تحميل: **{curr}**\nوسيبدأ تلقائياً تجهيز: **{new}** فور انتهائه مباشرة.",
-        "downloading": "⏳ **جاري تجهيز وتحميل ({label})...**\nلحظات وسيكون جاهزاً لديك.",
-        "uploading": "📤 **جاري إرسال الملف إليك الآن...**",
-        "download_error": "❌ **تعذر تحميل المقطع.** يرجى تجربة جودة أخرى أو المحاولة لاحقاً.",
-        "file_not_found": "❌ حدث خطأ غير متوقع أثناء المعالجة، يرجى إعادة المحاولة.",
+        "queue_notice": "⏳ جاري استكمال: **{curr}**\nوسيبدأ تلقائياً تجهيز: **{new}** فور انتهائه.",
+        "downloading": "⏳ **جاري تجهيز ({label})...**\nلحظات وسيكون جاهزاً لديك.",
+        "uploading": "📤 **جاري إرسال الملف إليك...**",
+        "download_error": "❌ **تعذر تحميل المقطع.** يرجى تجربة جودة أخرى.",
+        "file_not_found": "❌ حدث خطأ أثناء المعالجة، يرجى المحاولة لاحقاً.",
         "send_error": "❌ تعذر إرسال الملف عبر المحادثة.",
-        "link_ready": "✅ **تم تجهيز رابط التحميل المباشر لك بالأسفل 👇**",
+        "link_ready": "✅ **تم تجهيز رابط التحميل بالأسفل 👇**",
         "exceed_limit": (
-            "📁 **نظراً لدقة المقطع العالية أو طول مدته، تم إنشاء رابط تحميل سريع ومباشر لك:**\n"
-            "اضغط على زر التحميل أدناه لبدء التنزيل أو زر النسخ للحفظ عندك 👇"
+            "📁 **نظراً لدقة المقطع العالية أو طول مدته وتجاوزه حد تيليجرام (50MB)، تم إنشاء رابط تحميل مباشر:**\n"
+            "اضغط على زر التحميل أدناه للتنزيل المباشر أو زر النسخ للحفظ 👇"
         ),
-        "link_expire_note": "💡 يُفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
+        "link_expire_note": "💡 يفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
         "not_defined": "غير محدد",
         "minutes_seconds": "{m} دقيقة و {sec} ثانية",
         "hours_minutes": "{h} س {m} د {sec} ث",
+        "playlist_title": "📋 **قائمة تشغيل:** `{title}`\n🌐 **المنصة:** `{platform}`\n🔢 **عدد المقاطع:** {count}\n\n👇 **اختر المقطع المطلوب لتحميله:**",
+        "btn_next": "التالي ⬅️",
+        "btn_prev": "➡️ السابق",
     },
     "en": {
         "welcome": (
-            "👋 **Welcome {name} to Smart Downloader Bot!**\n"
+            "👋 **Welcome {name} to Media Downloader Bot!**\n"
             "Developer: **Ahmed Hassan Abdelnaby** 👨‍💻\n\n"
-            "Send any link from (YouTube, Facebook, TikTok, Instagram, X, Pinterest...)\n\n"
+            "Send any link or playlist from (YouTube, Facebook, TikTok, Instagram, X...)\n\n"
             "🎯 **Features:**\n"
-            "• Direct video & audio downloads with multiple qualities.\n"
-            "• High-speed direct download links for long media.\n\n"
-            "🚀 Send your link now to get started!"
+            "• Direct video & audio downloads.\n"
+            "• Direct download links for files exceeding 50MB.\n"
+            "• Playlist browsing and selective downloading.\n\n"
+            "Send a link to start."
         ),
-        "checking": "⚡ **Analyzing link and preparing options...**",
-        "fetch_error": "❌ **Failed to fetch media.** Please ensure the video or post is public.",
+        "checking": "🔍 **Analyzing link and preparing options...**",
+        "fetch_error": "❌ **Failed to fetch media.** Please ensure the link is public.",
         "no_formats": "⚠️ No downloadable formats found for this link.",
         "title": "📌 **Title:** `{title}`",
         "platform": "🌐 **Platform:** `{platform}`",
         "duration": "⏱ **Duration:** {duration}",
-        "choose_type": "👇 **Select your preferred format:**",
+        "choose_type": "👇 **Select content type:**",
         "btn_video": "🎬 Video",
         "btn_audio": "🎵 Audio Only",
         "btn_back": "🔙 Back",
         "btn_download": "⬇️ Download Media",
         "btn_copy": "📋 Copy Link",
         "expired": "⚠️ This option has expired. Please resend the link.",
-        "select_res": "🎬 **Select your preferred quality:**\n`{title}`",
+        "select_res": "🎬 **Select resolution:**\n`{title}`",
         "select_audio": "🎵 **Select audio format:**\n`{title}`",
-        "opt_not_found": "⚠️ This option is no longer available.",
-        "queue_notice": "⏳ Finishing download for: **{curr}**\n**{new}** will start automatically right after.",
-        "downloading": "⏳ **Preparing and downloading ({label})...**\nPlease wait.",
-        "uploading": "📤 **Sending file to you now...**",
-        "download_error": "❌ **Failed to download media.** Please try another quality or try again later.",
-        "file_not_found": "❌ An error occurred during processing. Please try again.",
+        "opt_not_found": "⚠️ Option no longer available.",
+        "queue_notice": "⏳ Finishing: **{curr}**\n**{new}** will start automatically.",
+        "downloading": "⏳ **Preparing ({label})...**\nPlease wait.",
+        "uploading": "📤 **Sending file...**",
+        "download_error": "❌ **Download failed.** Please try another option.",
+        "file_not_found": "❌ An error occurred during processing.",
         "send_error": "❌ Failed to send file.",
         "link_ready": "✅ **Direct download link is ready below 👇**",
         "exceed_limit": (
-            "📁 **Due to high quality or length, a fast direct download link was generated for you:**\n"
-            "Click download below to start or copy button to copy the link 👇"
+            "📁 **Due to high quality or duration exceeding Telegram's 50MB limit, a direct link was generated:**\n"
+            "Click download below to start or copy to save it 👇"
         ),
-        "link_expire_note": "💡 It is recommended to download now to save it to your device.",
+        "link_expire_note": "💡 You can start downloading now to save it to your device.",
         "not_defined": "Undefined",
         "minutes_seconds": "{m}m {sec}s",
         "hours_minutes": "{h}h {m}m {sec}s",
+        "playlist_title": "📋 **Playlist:** `{title}`\n🌐 **Platform:** `{platform}`\n🔢 **Total items:** {count}\n\n👇 **Select an item to download:**",
+        "btn_next": "Next ➡️",
+        "btn_prev": "⬅️ Prev",
     }
 }
 
@@ -229,7 +236,6 @@ def format_duration_str(seconds, update: Update) -> str:
     return t(update, "minutes_seconds", m=m, sec=sec)
 
 def unshorten_url(url: str) -> str:
-    """فك الروابط المختصرة لفيسبوك وتيك توك وغيرها للوصول للرابط الحقيقي"""
     clean_url = url.strip()
     if any(dom in clean_url for dom in ("tiktok.com", "fb.watch", "facebook.com", "youtu.be")):
         try:
@@ -278,14 +284,12 @@ def parse_media_data(info: Dict[str, Any]):
         format_note = str(f.get("format_note") or "").upper()
         format_id = str(f.get("format_id") or "").upper()
 
-        # صيغ الصوت فقط
         is_audio_only = (
             (vcodec == "none" and acodec and acodec != "none")
             or f.get("resolution") == "audio only"
             or ext in ("mp3", "m4a", "aac", "opus", "wav", "flac")
         )
 
-        # صيغ الفيديو (سواء منفصلة أو مدمجة كما في تيك توك وفيسبوك)
         is_video = not is_audio_only
 
         if is_video:
@@ -311,7 +315,6 @@ def parse_media_data(info: Dict[str, Any]):
                 if not video_options[label].get("single_url") and ".m3u8" not in url:
                     video_options[label]["single_url"] = url
 
-            # فحص المقاطع المدمجة للرابط المباشر
             is_progressive = (
                 (vcodec and vcodec != "none" and acodec and acodec != "none")
                 or (vcodec is None and acodec is None)
@@ -336,7 +339,6 @@ def parse_media_data(info: Dict[str, Any]):
                     "direct_url": url if ".m3u8" not in url else None,
                 }
 
-    # إذا تم جلب البيانات ولكن لم تصنف الصيغ، نضيف خيار الدقة الأفضل تلقائياً
     if not video_options:
         video_options["أفضل دقة متاحة"] = {
             "height": info.get("height"),
@@ -345,7 +347,6 @@ def parse_media_data(info: Dict[str, Any]):
             "ext": (info.get("ext") or "mp4").lower(),
         }
 
-    # دعم استخراج الصوت للمقاطع التي لا تحتوي على مسار صوتي منفصل
     if not audio_formats and video_options:
         audio_formats["MP3"] = {
             "ext": "mp3",
@@ -411,6 +412,31 @@ def _build_main_keyboard(media_id: str, media: dict, update: Update):
         keyboard.append(row)
     return keyboard
 
+def _build_playlist_keyboard(pl_id: str, page: int = 0, per_page: int = 6):
+    pl_data = PLAYLIST_CACHE.get(pl_id)
+    if not pl_data:
+        return []
+    entries = pl_data.get("entries", [])
+    total = len(entries)
+    start = page * per_page
+    end = min(start + per_page, total)
+
+    keyboard = []
+    for idx in range(start, end):
+        e = entries[idx]
+        title_btn = f"{idx+1}. {e.get('title', 'Video')[:30]}"
+        keyboard.append([InlineKeyboardButton(title_btn, callback_data=f"ple:{pl_id}:{idx}")])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("➡️ السابق", callback_data=f"plp:{pl_id}:{page-1}"))
+    if end < total:
+        nav_row.append(InlineKeyboardButton("التالي ⬅️", callback_data=f"plp:{pl_id}:{page+1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    return keyboard
+
 # ==================== أوامر ومعالجات البوت ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name or "صديقي"
@@ -418,7 +444,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def process_single_link(target_url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة الرابط المنفرد بالكامل قبل الانتقال للرابط الذي يليه"""
     target_url = unshorten_url(target_url)
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
@@ -428,30 +453,23 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
             strategies = [
                 {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["android", "ios", "mweb"]}}},
                 {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["ios", "mweb", "web"]}}},
-                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["tv", "mweb"]}}},
-                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["web"]}}},
                 {},
             ]
         else:
-            # لتيك توك وفيسبوك وباقي المنصات: عدم فرض ترويسات يوتيوب
             strategies = [
                 {},
                 {"user_agent": USER_AGENT},
-                {"user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"},
             ]
 
         last_exception = None
         for strat in strategies:
             opts = dict(YTDL_INFO_OPTS)
             opts.update(strat)
+            opts["extract_flat"] = "in_playlist"
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     data = ydl.extract_info(target_url, download=False)
                     if data:
-                        if "entries" in data and data["entries"]:
-                            for entry in data["entries"]:
-                                if entry:
-                                    return entry
                         return data
             except Exception as err:
                 last_exception = err
@@ -465,6 +483,43 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
         return
 
+    # فحص ما إذا كان الرابط يمثل قائمة تشغيل
+    is_playlist = (
+        info.get("_type") == "playlist"
+        or ("entries" in info and isinstance(info["entries"], (list, type((x for x in [])))))
+    )
+
+    if is_playlist:
+        entries = [e for e in info.get("entries", []) if e]
+        if not entries:
+            await status_msg.edit_text(t(update, "no_formats"))
+            return
+
+        pl_id = uuid.uuid4().hex[:8]
+        PLAYLIST_CACHE[pl_id] = {
+            "id": pl_id,
+            "title": info.get("title", "Playlist"),
+            "platform": info.get("extractor_key", "Web"),
+            "entries": entries,
+            "time": time.time(),
+        }
+
+        pl_text = t(
+            update,
+            "playlist_title",
+            title=info.get("title", "Playlist")[:70],
+            platform=info.get("extractor_key", "Web"),
+            count=len(entries),
+        )
+        keyboard = _build_playlist_keyboard(pl_id, page=0)
+        await status_msg.edit_text(
+            pl_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+        return
+
+    # رابط فيديو فردي
     video_opts, audio_fmts, best_prog = parse_media_data(info)
     if not video_opts and not audio_fmts:
         await status_msg.edit_text(t(update, "no_formats"))
@@ -506,7 +561,6 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
-    # استخراج كافة الروابط الموجودة في الرسالة
     urls = re.findall(r'(https?://[^\s]+)', text)
     if not urls:
         return
@@ -515,7 +569,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in USER_FETCH_LOCKS:
         USER_FETCH_LOCKS[user_id] = asyncio.Lock()
 
-    # جلب بيانات الروابط واحداً تلو الآخر بالتسلسل للمستخدم
     async with USER_FETCH_LOCKS[user_id]:
         for target_url in urls:
             try:
@@ -553,7 +606,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         f"{t(update, 'duration', duration=format_duration_str(media.get('duration', 0), update))}\n"
         f"🎯 **الجودة:** {label}{size_str}\n\n"
         f"{t(update, 'exceed_limit')}\n\n"
-        f"🔗 **رابط التحميل المباشر:**\n`{direct_url}`\n\n"
+        f"🔗 **رابط التحميل:**\n`{direct_url}`\n\n"
         f"{t(update, 'link_expire_note')}"
     )
 
@@ -588,7 +641,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         disable_web_page_preview=not is_webpage,
     )
 
-# ==================== معالجة طابور المستخدم المتتابع للتحميل ====================
+# ==================== إدارة طابور التحميل ====================
 async def user_download_worker(user_id: int):
     q = USER_TASK_QUEUES[user_id]
     while True:
@@ -870,6 +923,73 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+    elif data.startswith("plp:"):
+        _, pl_id, page_s = data.split(":", 2)
+        page = int(page_s)
+        pl_data = PLAYLIST_CACHE.get(pl_id)
+        if not pl_data:
+            await query.edit_message_text(t(update, "expired"))
+            return
+        keyboard = _build_playlist_keyboard(pl_id, page=page)
+        pl_text = t(
+            update,
+            "playlist_title",
+            title=pl_data.get("title", "Playlist")[:70],
+            platform=pl_data.get("platform", "Web"),
+            count=len(pl_data.get("entries", [])),
+        )
+        await query.edit_message_text(pl_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data.startswith("ple:"):
+        _, pl_id, idx_s = data.split(":", 2)
+        idx = int(idx_s)
+        pl_data = PLAYLIST_CACHE.get(pl_id)
+        if not pl_data or idx >= len(pl_data.get("entries", [])):
+            await query.edit_message_text(t(update, "expired"))
+            return
+
+        entry = pl_data["entries"][idx]
+        target_url = entry.get("url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
+        
+        await query.edit_message_text(t(update, "checking"), parse_mode="Markdown")
+
+        def fetch_entry():
+            opts = dict(YTDL_INFO_OPTS)
+            opts["extract_flat"] = False
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(target_url, download=False)
+
+        try:
+            info = await asyncio.to_thread(fetch_entry)
+        except Exception as e:
+            logger.error(f"Failed to fetch entry: {e}")
+            await query.edit_message_text(t(update, "fetch_error"), parse_mode="Markdown")
+            return
+
+        video_opts, audio_fmts, best_prog = parse_media_data(info)
+        media_id = uuid.uuid4().hex[:8]
+        MEDIA_CACHE[media_id] = {
+            "id": media_id,
+            "title": info.get("title", "media"),
+            "platform": info.get("extractor_key", "Web"),
+            "duration": info.get("duration", 0),
+            "video_opts": video_opts,
+            "audio_fmts": audio_fmts,
+            "best_progressive": best_prog,
+            "webpage_url": info.get("webpage_url") or target_url,
+            "time": time.time(),
+        }
+
+        dur_str = format_duration_str(info.get("duration", 0), update)
+        keyboard = _build_main_keyboard(media_id, MEDIA_CACHE[media_id], update)
+        info_text = (
+            f"{t(update, 'title', title=info.get('title', 'media')[:70])}\n"
+            f"{t(update, 'platform', platform=info.get('extractor_key', 'Web'))}\n"
+            f"{t(update, 'duration', duration=dur_str)}\n\n"
+            f"{t(update, 'choose_type')}"
+        )
+        await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
     elif data.startswith("cp:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -877,7 +997,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if target_link:
             await query.answer("📋 اضغط مطولاً على الرابط لنسخه!")
             await query.message.reply_text(
-                f"📋 **اضغط على الرابط بالأسفل لنسخه بنقرة واحدة:**\n`{target_link}`",
+                f"📋 **اضغط على الرابط بالأسفل لنسخه:**\n`{target_link}`",
                 parse_mode="Markdown"
             )
         else:
@@ -886,7 +1006,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== التشغيل ====================
 async def on_startup(app):
     check_ffmpeg()
-    print("🚀 تم تشغيل بوت التحميل الذكي بأقصى أداء وتجربة مستخدم نقية!")
+    print("🚀 تم تشغيل بوت التحميل بنجاح!")
 
 async def on_shutdown(app):
     for worker in USER_WORKERS.values():
