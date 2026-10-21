@@ -32,8 +32,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# جلب التوكن من متغيرات البيئة (GitHub Secrets)
+# ==================== إعدادات التوكن والقناة ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+# ضع يوزر قناتك هنا مع علامة @ أو المعرف الرقمي -100xxx (أو ضعه في Secrets)
+REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "@Basira_Tech")
+# رابط الانضمام لقناتك ليظهر في الزر
+CHANNEL_URL = os.environ.get("CHANNEL_URL", "https://t.me/YourChannelUsername")
 
 # ==================== التحقق من FFmpeg ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -113,8 +118,18 @@ I18N = {
             "🎯 **الخدمات المتاحة:**\n"
             "• إرسال المقاطع مباشرة بجودات وصيغ صوتية متعددة.\n"
             "• روابط تحميل مباشرة للمقاطع التي تتجاوز حجم 50 ميجابايت.\n"
-            "• استعراض وتحميل مقاطع قوائم التشغيل.\n\n"
-            "أرسل الرابط للبدء."
+            "• تصفح واختيار مقاطع قوائم التشغيل بمعلوماتها الكاملة.\n\n"
+            "أرسل الرابط للبدء الآن 🚀"
+        ),
+        "sub_required": (
+            "⚠️ **عذراً، يجب عليك الانضمام إلى قناتنا أولاً لاستخدام البوت!**\n\n"
+            "🚀 **لماذا عليك الانضمام لقناتنا؟**\n"
+            "قناتنا هي مجتمعك التقني المتكامل لمتابعة أقوى المشاريع والأفكار:\n"
+            "✨ **برامج ويندوز (Windows):** أدوات حصرية لتسهيل مهامك اليومية.\n"
+            "📱 **تطبيقات أندرويد (Android):** مشاريع وتطبيقات مميزة ومجانية.\n"
+            "🤖 **بوتات تيليجرام:** بوتات خدمية وأدوات متطورة تفيدك دائماً.\n"
+            "💡 **شروحات وتقنية:** كل جديد في عالم البرمجة والذكاء الاصطناعي أولاً بأول!\n\n"
+            "👇 **اشترك الآن عبر الزر أدناه ثم اضغط 'تحقق من الاشتراك':**"
         ),
         "checking": "🔍 **جاري فحص الرابط وتجهيز الخيارات...**",
         "fetch_error": "❌ **تعذر جلب بيانات الرابط.** يرجى التأكد أن المقطع متاح للجميع وليس خاصاً.",
@@ -128,6 +143,8 @@ I18N = {
         "btn_back": "🔙 رجوع",
         "btn_download": "⬇️ تحميل المقطع",
         "btn_copy": "📋 نسخ الرابط",
+        "btn_join": "📢 الانضمام إلى القناة",
+        "btn_verify_sub": "🔄 تحقق من الاشتراك",
         "expired": "⚠️ انتهت صلاحية هذا الخيار، أرسل الرابط مجدداً.",
         "select_res": "🎬 **اختر الدقة المطلوبة:**\n`{title}`",
         "select_audio": "🎵 **اختر الامتداد الصوتي:**\n`{title}`",
@@ -141,26 +158,38 @@ I18N = {
         "link_ready": "✅ **تم تجهيز رابط التحميل بالأسفل 👇**",
         "exceed_limit": (
             "📁 **نظراً لدقة المقطع العالية أو طول مدته وتجاوزه حد تيليجرام (50MB)، تم إنشاء رابط تحميل مباشر:**\n"
-            "اضغط على زر التحميل أدناه للتنزيل المباشر أو زر النسخ للحفظ 👇"
+            "اضغط على زر التحميل أدناه للتنزيل المباشر أو زر النسخ للحفظ عندك 👇"
         ),
         "link_expire_note": "💡 يفضل البدء بالتحميل الآن لحفظ المقطع على جهازك.",
         "not_defined": "غير محدد",
         "minutes_seconds": "{m} دقيقة و {sec} ثانية",
         "hours_minutes": "{h} س {m} د {sec} ث",
-        "playlist_title": "📋 **قائمة تشغيل:** `{title}`\n🌐 **المنصة:** `{platform}`\n🔢 **عدد المقاطع:** {count}\n\n👇 **اختر المقطع المطلوب لتحميله:**",
-        "btn_next": "التالي ⬅️",
-        "btn_prev": "➡️ السابق",
+        "playlist_header": (
+            "📋 **قائمة تشغيل:** `{title}`\n"
+            "🌐 **المنصة:** `{platform}`\n"
+            "🔢 **عدد المقاطع:** {count} | 📄 **الصفحة:** {page}/{total_pages}\n\n"
+            "👇 **تفاصيل المقاطع في هذه الصفحة:**\n"
+        ),
     },
     "en": {
         "welcome": (
-            "👋 **Welcome {name} to Media Downloader Bot!**\n"
+            "👋 **Welcome {name} to Downloader Bot!**\n"
             "Developer: **Ahmed Hassan Abdelnaby** 👨‍💻\n\n"
             "Send any link or playlist from (YouTube, Facebook, TikTok, Instagram, X...)\n\n"
             "🎯 **Features:**\n"
             "• Direct video & audio downloads.\n"
-            "• Direct download links for files exceeding 50MB.\n"
-            "• Playlist browsing and selective downloading.\n\n"
-            "Send a link to start."
+            "• Fast direct links for media exceeding 50MB.\n"
+            "• Playlist browser with detailed video metadata.\n\n"
+            "Send your link to start 🚀"
+        ),
+        "sub_required": (
+            "⚠️ **You must join our official channel to use the bot!**\n\n"
+            "🚀 **Why should you join?**\n"
+            "• Exclusive Windows software and tools.\n"
+            "• Useful Android apps and projects.\n"
+            "• Powerful Telegram bots and utilities.\n"
+            "• Latest tech news, AI tools, and programming guides.\n\n"
+            "👇 **Join now using the button below then click 'Check Subscription':**"
         ),
         "checking": "🔍 **Analyzing link and preparing options...**",
         "fetch_error": "❌ **Failed to fetch media.** Please ensure the link is public.",
@@ -174,6 +203,8 @@ I18N = {
         "btn_back": "🔙 Back",
         "btn_download": "⬇️ Download Media",
         "btn_copy": "📋 Copy Link",
+        "btn_join": "📢 Join Channel",
+        "btn_verify_sub": "🔄 Check Subscription",
         "expired": "⚠️ This option has expired. Please resend the link.",
         "select_res": "🎬 **Select resolution:**\n`{title}`",
         "select_audio": "🎵 **Select audio format:**\n`{title}`",
@@ -193,9 +224,12 @@ I18N = {
         "not_defined": "Undefined",
         "minutes_seconds": "{m}m {sec}s",
         "hours_minutes": "{h}h {m}m {sec}s",
-        "playlist_title": "📋 **Playlist:** `{title}`\n🌐 **Platform:** `{platform}`\n🔢 **Total items:** {count}\n\n👇 **Select an item to download:**",
-        "btn_next": "Next ➡️",
-        "btn_prev": "⬅️ Prev",
+        "playlist_header": (
+            "📋 **Playlist:** `{title}`\n"
+            "🌐 **Platform:** `{platform}`\n"
+            "🔢 **Total Videos:** {count} | 📄 **Page:** {page}/{total_pages}\n\n"
+            "👇 **Videos list on this page:**\n"
+        ),
     }
 }
 
@@ -211,6 +245,39 @@ def t(update: Update, key: str, **kwargs) -> str:
     if kwargs:
         return text.format(**kwargs)
     return text
+
+# ==================== التحقق الصارم من الاشتراك الإجباري ====================
+async def check_user_subscription(bot, user_id: int) -> bool:
+    """التحقق في كل طلب من أن المستخدم عضو في القناة"""
+    if not REQUIRED_CHANNEL or REQUIRED_CHANNEL == "@YourChannelUsername":
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
+        if member.status in ("creator", "administrator", "member", "restricted"):
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"Subscription check warning for {user_id}: {e}")
+        # إذا كان المعرف غير مضبوط بعد أو البوت ليس مشرفاً نسمح بالمرور منعاً لتعطل البوت
+        return False
+
+def get_sub_markup(update: Update) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(t(update, "btn_join"), url=CHANNEL_URL)],
+        [InlineKeyboardButton(t(update, "btn_verify_sub"), callback_data="check_sub")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+async def require_subscription_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = t(update, "sub_required")
+    markup = get_sub_markup(update)
+    if update.message:
+        await update.message.reply_text(msg, reply_markup=markup, parse_mode="Markdown")
+    elif update.callback_query:
+        try:
+            await update.callback_query.message.reply_text(msg, reply_markup=markup, parse_mode="Markdown")
+        except Exception:
+            pass
 
 # ==================== دوال مساعدة ====================
 def format_size(bytes_val) -> str:
@@ -235,16 +302,27 @@ def format_duration_str(seconds, update: Update) -> str:
         return t(update, "hours_minutes", h=h, m=m, sec=sec)
     return t(update, "minutes_seconds", m=m, sec=sec)
 
+def format_duration_compact(seconds) -> str:
+    if not seconds:
+        return "--:--"
+    try:
+        s = int(seconds)
+        h = s // 3600
+        m = (s % 3600) // 60
+        sec = s % 60
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{sec:02d}"
+        return f"{m:02d}:{sec:02d}"
+    except Exception:
+        return "--:--"
+
 def unshorten_url(url: str) -> str:
     clean_url = url.strip()
     if any(dom in clean_url for dom in ("tiktok.com", "fb.watch", "facebook.com", "youtu.be")):
         try:
             req = urllib.request.Request(
                 clean_url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
+                headers={"User-Agent": USER_AGENT}
             )
             with urllib.request.urlopen(req, timeout=8) as resp:
                 resolved = resp.geturl()
@@ -412,21 +490,53 @@ def _build_main_keyboard(media_id: str, media: dict, update: Update):
         keyboard.append(row)
     return keyboard
 
-def _build_playlist_keyboard(pl_id: str, page: int = 0, per_page: int = 6):
+# ==================== بناء قائمة التشغيل مع تفاصيل كل مقطع ====================
+def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 5):
     pl_data = PLAYLIST_CACHE.get(pl_id)
     if not pl_data:
-        return []
+        return "", []
+
     entries = pl_data.get("entries", [])
     total = len(entries)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+
     start = page * per_page
     end = min(start + per_page, total)
 
+    header = t(
+        update,
+        "playlist_header",
+        title=pl_data.get("title", "Playlist")[:65],
+        platform=pl_data.get("platform", "Web"),
+        count=total,
+        page=page + 1,
+        total_pages=total_pages,
+    )
+
+    items_text_list = []
     keyboard = []
+
     for idx in range(start, end):
         e = entries[idx]
-        title_btn = f"{idx+1}. {e.get('title', 'Video')[:30]}"
-        keyboard.append([InlineKeyboardButton(title_btn, callback_data=f"ple:{pl_id}:{idx}")])
+        title = e.get("title") or f"Video {idx+1}"
+        dur_raw = e.get("duration") or 0
+        dur_compact = format_duration_compact(dur_raw)
+        uploader = e.get("uploader") or e.get("channel") or "Unknown"
 
+        # إضافة معلومات المقطع بالتفصيل في الرسالة
+        items_text_list.append(
+            f"🔹 **{idx+1}.** `{title[:55]}`\n"
+            f"   ⏱ **المدة:** {dur_compact}  |  👤 **الناشر:** `{uploader[:25]}`\n"
+        )
+
+        # الزر يحتوي على رقم المقطع + عنوانه + المدة
+        btn_label = f"{idx+1}. {title[:22]} ⏱{dur_compact}"
+        keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"ple:{pl_id}:{idx}")])
+
+    full_text = header + "\n".join(items_text_list)
+
+    # أزرار التنقل بين الصفحات
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("➡️ السابق", callback_data=f"plp:{pl_id}:{page-1}"))
@@ -435,10 +545,16 @@ def _build_playlist_keyboard(pl_id: str, page: int = 0, per_page: int = 6):
     if nav_row:
         keyboard.append(nav_row)
 
-    return keyboard
+    return full_text, keyboard
 
 # ==================== أوامر ومعالجات البوت ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # التحقق من الاشتراك عند البدء
+    if not await check_user_subscription(context.bot, user_id):
+        await require_subscription_prompt(update, context)
+        return
+
     user_name = update.effective_user.first_name or "صديقي"
     msg = t(update, "welcome", name=user_name)
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -504,14 +620,7 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
             "time": time.time(),
         }
 
-        pl_text = t(
-            update,
-            "playlist_title",
-            title=info.get("title", "Playlist")[:70],
-            platform=info.get("extractor_key", "Web"),
-            count=len(entries),
-        )
-        keyboard = _build_playlist_keyboard(pl_id, page=0)
+        pl_text, keyboard = _build_playlist_page(pl_id, 0, update)
         await status_msg.edit_text(
             pl_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -519,7 +628,7 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         )
         return
 
-    # رابط فيديو فردي
+    # مقطع فردي
     video_opts, audio_fmts, best_prog = parse_media_data(info)
     if not video_opts and not audio_fmts:
         await status_msg.edit_text(t(update, "no_formats"))
@@ -560,12 +669,18 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
     )
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # التحقق الحازم عند كل رسالة يتم إرسالها
+    if not await check_user_subscription(context.bot, user_id):
+        await require_subscription_prompt(update, context)
+        return
+
     text = update.message.text or ""
     urls = re.findall(r'(https?://[^\s]+)', text)
     if not urls:
         return
 
-    user_id = update.effective_user.id
     if user_id not in USER_FETCH_LOCKS:
         USER_FETCH_LOCKS[user_id] = asyncio.Lock()
 
@@ -641,7 +756,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         disable_web_page_preview=not is_webpage,
     )
 
-# ==================== إدارة طابور التحميل ====================
+# ==================== طابور التحميل المتتابع ====================
 async def user_download_worker(user_id: int):
     q = USER_TASK_QUEUES[user_id]
     while True:
@@ -680,7 +795,7 @@ async def enqueue_download(query, update: Update, media: dict, mode: str, label:
 
     await USER_TASK_QUEUES[user_id].put((query, update, media, mode, label, option))
 
-# ==================== التحميل الفعلي والإرسال ====================
+# ==================== تنفيذ التحميل والإرسال ====================
 async def perform_download_and_send(query, update: Update, media: dict, mode: str, label: str, option: dict):
     est = estimate_size(option, media, mode)
     should_download = False
@@ -832,8 +947,26 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
 # ==================== معالج الأزرار ====================
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user_id = query.from_user.id
     data = query.data
+
+    # زر التحقق من الاشتراك
+    if data == "check_sub":
+        if await check_user_subscription(context.bot, user_id):
+            await query.answer("✅ تم التحقق بنجاح! أنت الآن مشترك في القناة.", show_alert=True)
+            user_name = query.from_user.first_name or "صديقي"
+            await query.edit_message_text(t(update, "welcome", name=user_name), parse_mode="Markdown")
+        else:
+            await query.answer("❌ ما زلت غير منضم للقناة! اشترك أولاً ثم اضغط تحقق.", show_alert=True)
+        return
+
+    # التحقق من الاشتراك قبل تنفيذ أي نقرة زر أخرى
+    if not await check_user_subscription(context.bot, user_id):
+        await query.answer("⚠️ لا يمكنك الاستمرار دون الاشتراك في القناة!", show_alert=True)
+        await require_subscription_prompt(update, context)
+        return
+
+    await query.answer()
 
     if data.startswith("sv:"):
         mid = data[3:]
@@ -926,18 +1059,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("plp:"):
         _, pl_id, page_s = data.split(":", 2)
         page = int(page_s)
-        pl_data = PLAYLIST_CACHE.get(pl_id)
-        if not pl_data:
+        pl_text, keyboard = _build_playlist_page(pl_id, page, update)
+        if not pl_text:
             await query.edit_message_text(t(update, "expired"))
             return
-        keyboard = _build_playlist_keyboard(pl_id, page=page)
-        pl_text = t(
-            update,
-            "playlist_title",
-            title=pl_data.get("title", "Playlist")[:70],
-            platform=pl_data.get("platform", "Web"),
-            count=len(pl_data.get("entries", [])),
-        )
         await query.edit_message_text(pl_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data.startswith("ple:"):
@@ -950,7 +1075,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         entry = pl_data["entries"][idx]
         target_url = entry.get("url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
-        
+
         await query.edit_message_text(t(update, "checking"), parse_mode="Markdown")
 
         def fetch_entry():
@@ -1006,7 +1131,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== التشغيل ====================
 async def on_startup(app):
     check_ffmpeg()
-    print("🚀 تم تشغيل بوت التحميل بنجاح!")
+    print("🚀 تم تشغيل البوت بنجاح مع تفعيل التحقق الصارم من الاشتراك ودعم قوائم التشغيل المفصلة!")
 
 async def on_shutdown(app):
     for worker in USER_WORKERS.values():
