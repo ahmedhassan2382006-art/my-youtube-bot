@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import uuid
 import time
+import urllib.request
 from typing import Dict, Any, Optional
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -74,22 +75,15 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-# خيارات جلب البيانات المتقدمة لتخطي قيود يوتيوب وباقي المنصات
+# خيارات عامة ونظيفة دون فرض ترويسات يوتيوب على باقي المنصات
 YTDL_INFO_OPTS = {
     "quiet": True,
     "no_warnings": True,
     "skip_download": True,
     "noplaylist": True,
-    "user_agent": USER_AGENT,
     "nocheckcertificate": True,
     "geo_bypass": True,
     "ignoreerrors": False,
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "ios", "mweb", "web"],
-            "player_skip": ["configs"],
-        }
-    },
 }
 if COOKIE_FILE:
     YTDL_INFO_OPTS["cookiefile"] = COOKIE_FILE
@@ -99,6 +93,7 @@ MEDIA_CACHE: Dict[str, dict] = {}
 USER_TASK_QUEUES: Dict[int, asyncio.Queue] = {}
 USER_CURRENT_TASK: Dict[int, str] = {}
 USER_WORKERS: Dict[int, asyncio.Task] = {}
+USER_FETCH_LOCKS: Dict[int, asyncio.Lock] = {}
 
 MAX_CONCURRENT_DOWNLOADS = 3
 GLOBAL_DOWNLOAD_SEMAPHORE = None
@@ -233,6 +228,26 @@ def format_duration_str(seconds, update: Update) -> str:
         return t(update, "hours_minutes", h=h, m=m, sec=sec)
     return t(update, "minutes_seconds", m=m, sec=sec)
 
+def unshorten_url(url: str) -> str:
+    """فك الروابط المختصرة لفيسبوك وتيك توك وغيرها للوصول للرابط الحقيقي"""
+    clean_url = url.strip()
+    if any(dom in clean_url for dom in ("tiktok.com", "fb.watch", "facebook.com", "youtu.be")):
+        try:
+            req = urllib.request.Request(
+                clean_url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                }
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                resolved = resp.geturl()
+                if resolved:
+                    return resolved
+        except Exception:
+            pass
+    return clean_url
+
 # ==================== تحليل بيانات المقطع ====================
 def parse_media_data(info: Dict[str, Any]):
     formats = info.get("formats", []) or []
@@ -252,43 +267,91 @@ def parse_media_data(info: Dict[str, Any]):
 
     for f in formats:
         url = f.get("url", "") or ""
-        if not url.startswith("http") or ".m3u8" in url:
+        if not url.startswith("http"):
             continue
 
-        vcodec = f.get("vcodec") or "none"
-        acodec = f.get("acodec") or "none"
+        vcodec = f.get("vcodec")
+        acodec = f.get("acodec")
         ext = (f.get("ext") or "mp4").lower()
         height = f.get("height")
         size = f.get("filesize") or f.get("filesize_approx") or 0
+        format_note = str(f.get("format_note") or "").upper()
+        format_id = str(f.get("format_id") or "").upper()
 
-        if vcodec not in ("none", ""):
-            label = f"{height}p" if height else "Standard"
+        # صيغ الصوت فقط
+        is_audio_only = (
+            (vcodec == "none" and acodec and acodec != "none")
+            or f.get("resolution") == "audio only"
+            or ext in ("mp3", "m4a", "aac", "opus", "wav", "flac")
+        )
+
+        # صيغ الفيديو (سواء منفصلة أو مدمجة كما في تيك توك وفيسبوك)
+        is_video = not is_audio_only
+
+        if is_video:
+            if height:
+                label = f"{height}p"
+            elif "HD" in format_note or "HD" in format_id:
+                label = "HD"
+            elif "SD" in format_note or "SD" in format_id:
+                label = "SD"
+            else:
+                label = "Standard"
+
             if label not in video_options:
                 video_options[label] = {
                     "height": height,
                     "size": size,
                     "ext": ext,
+                    "single_url": url if ".m3u8" not in url else None,
                 }
+            else:
+                if size > 0 and not video_options[label].get("size"):
+                    video_options[label]["size"] = size
+                if not video_options[label].get("single_url") and ".m3u8" not in url:
+                    video_options[label]["single_url"] = url
 
-        if vcodec not in ("none", "") and acodec not in ("none", ""):
-            h = height or 0
-            if h > best_progressive_height:
-                best_progressive_height = h
-                best_progressive = {
-                    "url": url,
-                    "ext": ext,
-                    "size": size,
-                    "height": h,
-                }
+            # فحص المقاطع المدمجة للرابط المباشر
+            is_progressive = (
+                (vcodec and vcodec != "none" and acodec and acodec != "none")
+                or (vcodec is None and acodec is None)
+            )
+            if is_progressive and ".m3u8" not in url:
+                h = height or 0
+                if h >= best_progressive_height:
+                    best_progressive_height = h
+                    best_progressive = {
+                        "url": url,
+                        "ext": ext,
+                        "size": size,
+                        "height": h,
+                    }
 
-        if vcodec in ("none", "") and acodec not in ("none", ""):
-            audio_label = ext.upper()
+        if is_audio_only:
+            audio_label = ext.upper() if ext else "AUDIO"
             if audio_label not in audio_formats:
                 audio_formats[audio_label] = {
                     "ext": ext,
                     "size": size,
-                    "direct_url": url,
+                    "direct_url": url if ".m3u8" not in url else None,
                 }
+
+    # إذا تم جلب البيانات ولكن لم تصنف الصيغ، نضيف خيار الدقة الأفضل تلقائياً
+    if not video_options:
+        video_options["أفضل دقة متاحة"] = {
+            "height": info.get("height"),
+            "size": info.get("filesize") or info.get("filesize_approx") or 0,
+            "single_url": info.get("url") if (isinstance(info.get("url"), str) and ".m3u8" not in info.get("url")) else None,
+            "ext": (info.get("ext") or "mp4").lower(),
+        }
+
+    # دعم استخراج الصوت للمقاطع التي لا تحتوي على مسار صوتي منفصل
+    if not audio_formats and video_options:
+        audio_formats["MP3"] = {
+            "ext": "mp3",
+            "size": 0,
+            "direct_url": None,
+        }
 
     return video_options, audio_formats, best_progressive
 
@@ -354,24 +417,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = t(update, "welcome", name=user_name)
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text or ""
-    url_match = re.search(r'(https?://[^\s]+)', text)
-    if not url_match:
-        return
-
-    target_url = url_match.group(1)
+async def process_single_link(target_url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالجة الرابط المنفرد بالكامل قبل الانتقال للرابط الذي يليه"""
+    target_url = unshorten_url(target_url)
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
-    # آلية استخراج ذكية متعددة المسارات والمحاولات لتخطي كافة أنواع الحظر
     def fetch():
-        strategies = [
-            {"extractor_args": {"youtube": {"player_client": ["android", "ios", "mweb"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["ios", "mweb", "web"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["tv", "mweb"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["web"]}}},
-            {}
-        ]
+        is_youtube = any(d in target_url for d in ("youtube.com", "youtu.be"))
+        if is_youtube:
+            strategies = [
+                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["android", "ios", "mweb"]}}},
+                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["ios", "mweb", "web"]}}},
+                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["tv", "mweb"]}}},
+                {"user_agent": USER_AGENT, "extractor_args": {"youtube": {"player_client": ["web"]}}},
+                {},
+            ]
+        else:
+            # لتيك توك وفيسبوك وباقي المنصات: عدم فرض ترويسات يوتيوب
+            strategies = [
+                {},
+                {"user_agent": USER_AGENT},
+                {"user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"},
+            ]
+
         last_exception = None
         for strat in strategies:
             opts = dict(YTDL_INFO_OPTS)
@@ -380,7 +448,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     data = ydl.extract_info(target_url, download=False)
                     if data:
-                        # دعم الروابط التي ترجع مصفوفة مقاطع كصفحات انستغرام وتيك توك
                         if "entries" in data and data["entries"]:
                             for entry in data["entries"]:
                                 if entry:
@@ -394,7 +461,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         info = await asyncio.to_thread(fetch)
     except Exception as e:
-        logger.error(f"Error fetching url: {e}")
+        logger.error(f"Error fetching url {target_url}: {e}")
         await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
         return
 
@@ -437,6 +504,25 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    # استخراج كافة الروابط الموجودة في الرسالة
+    urls = re.findall(r'(https?://[^\s]+)', text)
+    if not urls:
+        return
+
+    user_id = update.effective_user.id
+    if user_id not in USER_FETCH_LOCKS:
+        USER_FETCH_LOCKS[user_id] = asyncio.Lock()
+
+    # جلب بيانات الروابط واحداً تلو الآخر بالتسلسل للمستخدم
+    async with USER_FETCH_LOCKS[user_id]:
+        for target_url in urls:
+            try:
+                await process_single_link(target_url, update, context)
+            except Exception as e:
+                logger.error(f"Error processing link {target_url}: {e}")
+
 # ==================== إرسال رابط التحميل المباشر مع زر النسخ ====================
 async def send_download_link(query, update: Update, media: dict, option: dict, label: str, mode: str, predicted_size: int):
     direct_url = None
@@ -471,7 +557,6 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         f"{t(update, 'link_expire_note')}"
     )
 
-    # بناء أزرار التحميل ونسخ الرابط
     action_buttons = [InlineKeyboardButton(t(update, "btn_download"), url=direct_url)]
 
     if CopyTextButton:
@@ -503,7 +588,7 @@ async def send_download_link(query, update: Update, media: dict, option: dict, l
         disable_web_page_preview=not is_webpage,
     )
 
-# ==================== معالجة طابور المستخدم المتتابع ====================
+# ==================== معالجة طابور المستخدم المتتابع للتحميل ====================
 async def user_download_worker(user_id: int):
     q = USER_TASK_QUEUES[user_id]
     while True:
@@ -564,8 +649,7 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         status = None
 
     if mode == "audio":
-        audio_ext = option["ext"]
-        format_selector = f"bestaudio[ext={audio_ext}]/bestaudio/best"
+        format_selector = "bestaudio/best"
     else:
         height = option.get("height")
         if option.get("single_url") or not height:
@@ -589,19 +673,22 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         "outtmpl": outtmpl,
         "format": format_selector,
         "merge_output_format": "mp4",
-        "user_agent": USER_AGENT,
         "retries": 5,
         "fragment_retries": 5,
         "concurrent_fragment_downloads": 4,
-        "extractor_args": {
+    }
+    if COOKIE_FILE:
+        ydl_opts["cookiefile"] = COOKIE_FILE
+
+    is_youtube = any(d in media["webpage_url"] for d in ("youtube.com", "youtu.be"))
+    if is_youtube:
+        ydl_opts["user_agent"] = USER_AGENT
+        ydl_opts["extractor_args"] = {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
                 "player_skip": ["configs"],
             }
-        },
-    }
-    if COOKIE_FILE:
-        ydl_opts["cookiefile"] = COOKIE_FILE
+        }
 
     def do_download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -695,7 +782,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    # 1) استعراض خيارات الفيديو: sv:{media_id}
     if data.startswith("sv:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -707,7 +793,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         def sort_key(k):
             m = re.match(r"(\d+)p", k)
-            return int(m.group(1)) if m else -1
+            if m:
+                return int(m.group(1))
+            if "HD" in k:
+                return 1080
+            if "SD" in k:
+                return 480
+            if "أفضل" in k or "Best" in k:
+                return 9999
+            return 0
 
         for label in sorted(opts.keys(), key=sort_key, reverse=True):
             size_str = format_size(opts[label].get("size"))
@@ -720,7 +814,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 2) استعراض خيارات الصوت: sa:{media_id}
     elif data.startswith("sa:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -740,7 +833,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 3) طلب تحميل جودة فيديو: rv:{media_id}:{label}
     elif data.startswith("rv:"):
         _, mid, label = data.split(":", 2)
         media = MEDIA_CACHE.get(mid)
@@ -753,7 +845,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await enqueue_download(query, update, media, mode="video", label=label, option=option)
 
-    # 4) طلب تحميل صيغة صوت: ra:{media_id}:{label}
     elif data.startswith("ra:"):
         _, mid, label = data.split(":", 2)
         media = MEDIA_CACHE.get(mid)
@@ -766,7 +857,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await enqueue_download(query, update, media, mode="audio", label=label, option=option)
 
-    # 5) العودة للقائمة الرئيسية: bm:{media_id}
     elif data.startswith("bm:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
@@ -780,7 +870,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    # 6) نسخ الرابط (للأجهزة والأنظمة التي لا تدعم النسخ المباشر من الزر)
     elif data.startswith("cp:"):
         mid = data[3:]
         media = MEDIA_CACHE.get(mid)
