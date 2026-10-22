@@ -88,12 +88,27 @@ BASE_YTDL_OPTS = {
     "http_headers": {
         "User-Agent": USER_AGENT,
         "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Accept": "*/*",
+        # ملاحظة: لا نضيف ترويسة Accept لأنها تكسر استخراج فيسبوك ("Cannot parse data")
     },
 }
 
 if COOKIE_FILE:
     BASE_YTDL_OPTS["cookiefile"] = COOKIE_FILE
+
+# ==================== استراتيجيات يوتيوب المتعددة (ترتيب مُختبر) ====================
+# ملاحظة: عميل ios وتحديد player_clients المقيّد صار يسبب خطأ
+# "Requested format is not available" في إصدارات yt-dlp الحديثة،
+# لذلك نعتمد أولاً على العملاء الافتراضيين ثم البدائل التي تعمل فعلاً.
+YOUTUBE_STRATEGIES = [
+    # 1) الافتراضي: يجلب أكبر عدد من الصيغ ويعمل باستقرار (الأفضل حالياً)
+    {},
+    # 2) عميل VisionOS: بديل ممتاز عند فشل الافتراضي
+    {"extractor_args": {"youtube": {"player_client": ["visionos"]}}},
+    # 3) عملاء أندرويد: خفيف وسريع ويجلب صيغاً مباشرة
+    {"extractor_args": {"youtube": {"player_client": ["android", "android_vr", "visionos"]}}},
+    # 4) دمج الافتراضي مع العملاء الصامدين ضد الحجب
+    {"extractor_args": {"youtube": {"player_client": ["default", "visionos", "android_vr"]}}},
+]
 
 # ==================== إدارة الذاكرة والعمليات ====================
 MEDIA_CACHE: Dict[str, dict] = {}
@@ -331,22 +346,131 @@ def format_duration_compact(seconds) -> str:
     except Exception:
         return "--:--"
 
+# ==================== أدوات التحقق من الروابط وقوائم التشغيل ====================
+def is_youtube_url(url: str) -> bool:
+    u = (url or "").lower()
+    return "youtube.com" in u or "youtu.be" in u
+
+def is_youtube_channel_url(url: str) -> bool:
+    """روابط القنوات/المستخدمين التي تُرجع تبويبات (Videos/Shorts) وليست قوائم فعلية"""
+    u = (url or "").strip()
+    if not is_youtube_url(u):
+        return False
+    # تُرجع قائمة التشغيل فقط عند وجود معرّف قائمة صريح أو رابط playlist
+    if "list=" in u or "/playlist" in u.lower():
+        return False
+    if re.search(r"youtube\.com/(channel/|c/|user/|@)", u, re.IGNORECASE):
+        return True
+    return False
+
+def channel_videos_url(url: str) -> str:
+    """تحويل رابط قناة إلى رابط تبويب الفيديوهات لجلب المقاطع الحقيقية"""
+    u = (url or "").strip().rstrip("/")
+    # إزالة أي تبويب موجود ثم إضافة /videos
+    u = re.sub(r"/(videos|shorts|streams|playlists|featured|community)$", "", u, flags=re.IGNORECASE)
+    if "view=" in u or "&" in u:
+        return u
+    return u + "/videos"
+
+def is_real_playlist(info: dict) -> bool:
+    """قائمة تشغيل حقيقية (أو تبويب فيديوهات قناة) تحتوي على مقاطع قابلة للتشغيل"""
+    if not isinstance(info, dict):
+        return False
+    if info.get("_type") != "playlist":
+        return False
+
+    entries = info.get("entries")
+    if not isinstance(entries, (list, tuple)):
+        return False
+
+    basename = str(info.get("webpage_url_basename") or "").lower()
+    playlist_id = str(info.get("id") or "")
+
+    # تبويبات القنوات (Videos/Shorts/...) تُرجع معرّف قناة يبدأ بـ UC
+    # نقبلها فقط إذا كانت فعلاً تبويب فيديوهات (basename == videos/playlist)
+    if re.match(r"^(UC|HC)", playlist_id) and basename not in ("videos", "playlist", "streams"):
+        return False
+
+    # يجب أن يحتوي على عنصر واحد على الأقل قابل للتشغيل (ليس تبويباً)
+    for e in entries:
+        if isinstance(e, dict) and not is_tab_entry(e) and (e.get("url") or re.match(r"^[A-Za-z0-9_-]{11}$", str(e.get("id") or ""))):
+            return True
+    return False
+
+def is_tab_entry(entry: dict) -> bool:
+    """عنصر تبويب قناة (Videos/Shorts/Live) وليس فيديو حقيقياً"""
+    if not isinstance(entry, dict):
+        return True
+    title = str(entry.get("title") or "")
+    if re.search(r"\s-\s(Videos|Shorts|Live|Streams|Playlists|Home|Community)\s*$", title, re.IGNORECASE):
+        return True
+    # لا يملك رابطاً ولا معرّف فيديو صالحاً
+    url = entry.get("url")
+    vid = str(entry.get("id") or "")
+    if not url and not re.match(r"^[A-Za-z0-9_-]{11}$", vid):
+        return True
+    return False
+
+def extract_youtube_strategies():
+    return YOUTUBE_STRATEGIES
+
+def entry_target_url(entry: dict) -> str:
+    url = entry.get("url") if isinstance(entry, dict) else None
+    if url:
+        return url
+    vid = str((entry or {}).get("id") or "")
+    if re.match(r"^[A-Za-z0-9_-]{11}$", vid):
+        return f"https://www.youtube.com/watch?v={vid}"
+    return ""
+
 # ==================== تحليل بيانات المقطع ====================
+def _pick_quality_label(width, height, format_note: str, format_id: str) -> Optional[str]:
+    """مسمّى الدقة الصحيح مع مراعاة المقاطع الرأسية (Portrait)"""
+    q = None
+    if width and height:
+        # للمقاطع الرأسية يكون العرض هو العرض الحقيقي للدقة
+        q = min(int(width), int(height))
+    elif height:
+        q = int(height)
+    elif width:
+        q = int(width)
+    if q:
+        # تقريب للدقات القياسية المعروفة لتجنّب مسميات غريبة مثل 1024p
+        for std in (144, 240, 360, 480, 720, 1080, 1440, 2160, 4320):
+            if abs(q - std) <= max(2, std * 0.04):
+                return f"{std}p"
+        return f"{q}p"
+    note = (format_note or "").upper()
+    fid = (format_id or "").upper()
+    if "HD" in note or "HD" in fid:
+        return "HD"
+    if "SD" in note or "SD" in fid:
+        return "SD"
+    return None
+
 def parse_media_data(info: Dict[str, Any]):
     formats = info.get("formats", []) or []
     video_options: Dict[str, dict] = {}
     audio_formats: Dict[str, dict] = {}
     best_progressive: Optional[dict] = None
-    best_progressive_height = -1
+    best_progressive_q = -1
+    generic_candidates = []  # صيغ بلا أبعاد معروفة (تُستخدم فقط إن لم توجد صيغ واضحة)
 
-    single_url = info.get("url")
-    if isinstance(single_url, str) and single_url.startswith("http"):
-        video_options["أفضل دقة متاحة"] = {
-            "height": info.get("height"),
-            "size": info.get("filesize") or info.get("filesize_approx") or 0,
-            "single_url": single_url,
-            "ext": (info.get("ext") or "mp4").lower(),
-        }
+    def add_video_option(label: str, entry: dict):
+        cur = video_options.get(label)
+        if cur is None:
+            video_options[label] = entry
+            return
+        # نفضّل الصيغة التي تملك رابطاً مباشراً وحجماً معروفاً
+        if not cur.get("single_url") and entry.get("single_url"):
+            cur["single_url"] = entry.get("single_url")
+            cur["ext"] = entry.get("ext")
+        if not cur.get("size") and entry.get("size"):
+            cur["size"] = entry.get("size")
+        if not cur.get("height") and entry.get("height"):
+            cur["height"] = entry["height"]
+        if not cur.get("width") and entry.get("width"):
+            cur["width"] = entry["width"]
 
     for f in formats:
         url = f.get("url", "") or ""
@@ -357,70 +481,146 @@ def parse_media_data(info: Dict[str, Any]):
         acodec = f.get("acodec")
         ext = (f.get("ext") or "mp4").lower()
         height = f.get("height")
+        width = f.get("width")
         size = f.get("filesize") or f.get("filesize_approx") or 0
-        format_note = str(f.get("format_note") or "").upper()
-        format_id = str(f.get("format_id") or "").upper()
+        format_note = str(f.get("format_note") or "")
+        format_id = str(f.get("format_id") or "")
+        protocol = str(f.get("protocol") or "")
+
+        # تجاهل الصور/الـ storyboards/الصيغ غير القابلة للتحميل كفيديو
+        if ext in ("mhtml", "jpg", "jpeg", "png", "webp", "gif"):
+            continue
+        if "storyboard" in format_note.lower() or protocol == "mhtml":
+            continue
+        if vcodec in (None, "none") and acodec in (None, "none"):
+            continue
 
         is_audio_only = (
-            (vcodec == "none" and acodec and acodec != "none")
-            or f.get("resolution") == "audio only"
-            or ext in ("mp3", "m4a", "aac", "opus", "wav", "flac")
+            (vcodec in (None, "none") and acodec not in (None, "none"))
+            or str(f.get("resolution")) == "audio only"
+            or ext in ("mp3", "m4a", "aac", "opus", "wav", "flac", "ogg")
         )
 
-        is_video = not is_audio_only
-
-        if is_video:
-            if height:
-                label = f"{height}p"
-            elif "HD" in format_note or "HD" in format_id:
-                label = "HD"
-            elif "SD" in format_note or "SD" in format_id:
-                label = "SD"
-            else:
-                label = "Standard"
-
-            if label not in video_options:
-                video_options[label] = {
-                    "height": height,
-                    "size": size,
-                    "ext": ext,
-                    "single_url": url if ".m3u8" not in url else None,
-                }
-            else:
-                if size > 0 and not video_options[label].get("size"):
-                    video_options[label]["size"] = size
-                if not video_options[label].get("single_url") and ".m3u8" not in url:
-                    video_options[label]["single_url"] = url
-
-            is_progressive = (
-                (vcodec and vcodec != "none" and acodec and acodec != "none")
-                or (vcodec is None and acodec is None)
-            )
-            if is_progressive and ".m3u8" not in url:
-                h = height or 0
-                if h >= best_progressive_height:
-                    best_progressive_height = h
-                    best_progressive = {
-                        "url": url,
-                        "ext": ext,
-                        "size": size,
-                        "height": h,
-                    }
-
         if is_audio_only:
-            audio_label = ext.upper() if ext else "AUDIO"
-            if audio_label not in audio_formats:
+            # مسمّى صوتي واضح يعتمد على كودك الصوت الحقيقي وليس الحاوية
+            codec = str(acodec or "").lower()
+            if codec.startswith("mp4a"):
+                audio_label = "M4A"
+            elif "opus" in codec:
+                audio_label = "OPUS"
+            elif "vorbis" in codec:
+                audio_label = "OGG"
+            elif codec and codec != "none":
+                audio_label = codec.split(".")[0].upper()
+            elif ext:
+                audio_label = ext.upper()
+            else:
+                audio_label = "AUDIO"
+            if audio_label == "MP4":
+                audio_label = "M4A"
+            cur_a = audio_formats.get(audio_label)
+            if cur_a is None:
                 audio_formats[audio_label] = {
                     "ext": ext,
                     "size": size,
                     "direct_url": url if ".m3u8" not in url else None,
                 }
+            else:
+                if size > 0 and not cur_a.get("size"):
+                    cur_a["size"] = size
+                if not cur_a.get("direct_url") and ".m3u8" not in url:
+                    cur_a["direct_url"] = url
+            continue
+
+        # فيديو فعلي
+        label = _pick_quality_label(width, height, format_note, format_id)
+        if not label:
+            # صيغة بلا أبعاد معروفة (مثل نسخة watermarked) نحتفظ بها كاحتياط فقط
+            generic_candidates.append({
+                "height": height,
+                "width": width,
+                "size": size,
+                "ext": ext,
+                "format_note": format_note,
+                "format_id": format_id,
+                "single_url": url if ".m3u8" not in url else None,
+            })
+            is_progressive = (
+                (vcodec and vcodec != "none" and acodec and acodec != "none")
+                or (vcodec is None and acodec is None)
+            )
+            if is_progressive and ".m3u8" not in url and best_progressive is None:
+                best_progressive = {
+                    "url": url, "ext": ext, "size": size,
+                    "height": height or width or 0,
+                }
+            continue
+
+        add_video_option(label, {
+            "height": height,
+            "width": width,
+            "size": size,
+            "ext": ext,
+            "single_url": url if ".m3u8" not in url else None,
+        })
+
+        is_progressive = (
+            (vcodec and vcodec != "none" and acodec and acodec != "none")
+            or (vcodec is None and acodec is None)
+        )
+        if is_progressive and ".m3u8" not in url:
+            q = min(int(width), int(height)) if (width and height) else (height or width or 0)
+            if q >= best_progressive_q:
+                best_progressive_q = q
+                best_progressive = {
+                    "url": url,
+                    "ext": ext,
+                    "size": size,
+                    "height": height or q,
+                }
+
+    # الاعتماد على الصيغ بلا أبعاد فقط إن لم نجد أي صيغة واضحة
+    if not video_options and generic_candidates:
+        def _generic_score(c):
+            note = (str(c.get("format_note") or "") + " " + str(c.get("format_id") or "")).lower()
+            score = c.get("size") or 0
+            if "hd" in note or "1080" in note or "720" in note:
+                score += 10 ** 12
+            if "watermark" in note:
+                score -= 10 ** 12
+            return score
+        gc = max(generic_candidates, key=_generic_score)
+        label = _pick_quality_label(gc.get("width"), gc.get("height"), gc.get("format_note", ""), gc.get("format_id", "")) or "أفضل دقة متاحة"
+        gc.pop("format_note", None)
+        gc.pop("format_id", None)
+        video_options[label] = gc
+
+    # الاعتماد على الرابط العلوي لوسائل التواصل كخيار مباشر عند توفّره
+    single_url = info.get("url")
+    if isinstance(single_url, str) and single_url.startswith("http") and ".m3u8" not in single_url:
+        if not video_options:
+            label = _pick_quality_label(info.get("width"), info.get("height"), "", "") or "أفضل دقة متاحة"
+            video_options[label] = {
+                "height": info.get("height"),
+                "width": info.get("width"),
+                "size": info.get("filesize") or info.get("filesize_approx") or 0,
+                "single_url": single_url,
+                "ext": (info.get("ext") or "mp4").lower(),
+            }
+        elif best_progressive is None:
+            best_progressive = {
+                "url": single_url,
+                "ext": (info.get("ext") or "mp4").lower(),
+                "size": info.get("filesize") or info.get("filesize_approx") or 0,
+                "height": info.get("height") or 0,
+            }
 
     if not video_options:
         video_options["أفضل دقة متاحة"] = {
             "height": info.get("height"),
+            "width": info.get("width"),
             "size": info.get("filesize") or info.get("filesize_approx") or 0,
-            "single_url": info.get("url") if (isinstance(info.get("url"), str) and ".m3u8" not in info.get("url")) else None,
+            "single_url": single_url if (isinstance(single_url, str) and ".m3u8" not in single_url) else None,
             "ext": (info.get("ext") or "mp4").lower(),
         }
 
@@ -515,13 +715,14 @@ def _build_playlist_page(pl_id: str, page: int, update: Update, per_page: int = 
 
     items_text_list = []
     keyboard = []
+    default_uploader = pl_data.get("uploader") or "Unknown"
 
     for idx in range(start, end):
         e = entries[idx]
         title = e.get("title") or f"Video {idx+1}"
         dur_raw = e.get("duration") or 0
         dur_compact = format_duration_compact(dur_raw)
-        uploader = e.get("uploader") or e.get("channel") or "Unknown"
+        uploader = e.get("uploader") or e.get("channel") or e.get("uploader_id") or default_uploader
 
         items_text_list.append(
             f"🔹 **{idx+1}.** `{title[:55]}`\n"
@@ -562,38 +763,22 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
     def fetch():
-        is_yt = any(d in target_url for d in ("youtube.com", "youtu.be"))
+        is_yt = is_youtube_url(target_url)
 
         # استراتيجيات متعددة لتخطي أي حظر من يوتيوب وباقي المنصات
         if is_yt:
-            strategies = [
-                # الاستراتيجية الأقوى حالياً: الجمع بين عميل iOS وعميل الشاشات والويب
-                {
-                    "extractor_args": {
-                        "youtube": {
-                            "player_client": ["ios", "mweb", "tv_embedded"],
-                            "player_skip": ["configs"],
-                        }
-                    }
-                },
-                # الاستراتيجية البديلة 1: عميل الويب الموسع
-                {
-                    "extractor_args": {
-                        "youtube": {
-                            "player_client": ["web_embedded", "mweb"],
-                        }
-                    }
-                },
-                # الاستراتيجية الافتراضية
-                {}
-            ]
+            strategies = YOUTUBE_STRATEGIES
         else:
-            strategies = [{}]
+            # للمنصات الأخرى: نجرب الترويسات المخصّصة أولاً ثم بدونها
+            # (بعض المنصات مثل فيسبوك ترفض بعض الترويسات)
+            strategies = [{}, {"http_headers": None}]
 
         last_err = None
         for strat in strategies:
             opts = dict(BASE_YTDL_OPTS)
             opts.update(strat)
+            if opts.get("http_headers") is None:
+                opts.pop("http_headers", None)
             opts["extract_flat"] = "in_playlist"
             opts["skip_download"] = True
 
@@ -615,22 +800,32 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
         return
 
-    is_playlist = (
-        info.get("_type") == "playlist"
-        or ("entries" in info and isinstance(info["entries"], (list, type((x for x in [])))))
-    )
+    # ===== معالجة روابط القنوات: تحويلها لتبويب الفيديوهات لجلب المقاطع الحقيقية =====
+    if is_youtube_channel_url(target_url):
+        target_url = channel_videos_url(target_url)
+        try:
+            info = await asyncio.to_thread(fetch)
+        except Exception as e:
+            logger.error(f"Error fetching channel videos {target_url}: {e}")
+            await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
+            return
 
-    if is_playlist:
-        entries = [e for e in info.get("entries", []) if e]
+    if is_real_playlist(info):
+        entries = [e for e in info.get("entries", []) if e and not is_tab_entry(e)]
         if not entries:
             await status_msg.edit_text(t(update, "no_formats"))
             return
 
         pl_id = uuid.uuid4().hex[:8]
+        pl_title = re.sub(
+            r"\s*-\s*(Videos|Shorts|Live|Streams|Playlists)\s*$", "",
+            str(info.get("title") or "Playlist"), flags=re.IGNORECASE,
+        )
         PLAYLIST_CACHE[pl_id] = {
             "id": pl_id,
-            "title": info.get("title", "Playlist"),
+            "title": pl_title,
             "platform": info.get("extractor_key", "Web"),
+            "uploader": info.get("uploader") or info.get("channel"),
             "entries": entries,
             "time": time.time(),
         }
@@ -857,30 +1052,47 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
         "concurrent_fragment_downloads": 4,
     })
 
-    is_youtube = any(d in media["webpage_url"] for d in ("youtube.com", "youtu.be"))
+    is_youtube = is_youtube_url(media["webpage_url"])
     if is_youtube:
+        # نستخدم العملاء الافتراضيين (الأكثر استقراراً) مع بدائل تعمل فعلاً
         ydl_opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["ios", "mweb", "tv_embedded"],
-                "player_skip": ["configs"],
+                "player_client": ["default", "visionos", "android_vr"],
             }
         }
 
     def do_download():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(media["webpage_url"], download=True)
-            rd = info.get("requested_downloads") or []
-            for r in rd:
-                fp = r.get("filepath")
-                if fp and os.path.exists(fp):
-                    return fp
-            filepath = ydl.prepare_filename(info)
-            stem = os.path.splitext(filepath)[0]
-            for try_ext in (".mp4", ".mkv", ".webm", ".m4a", ".opus", ".mp3"):
-                candidate = stem + try_ext
-                if os.path.exists(candidate):
-                    return candidate
-            return filepath
+        used_opts = ydl_opts
+        try:
+            with yt_dlp.YoutubeDL(used_opts) as ydl:
+                info = ydl.extract_info(media["webpage_url"], download=True)
+                rd = info.get("requested_downloads") or []
+                for r in rd:
+                    fp = r.get("filepath")
+                    if fp and os.path.exists(fp):
+                        return fp
+                filepath = ydl.prepare_filename(info)
+        except Exception:
+            # إن فشلت الاستراتيجية المحددة، نعيد المحاولة بالإعدادات الافتراضية
+            if not is_youtube:
+                raise
+            used_opts = dict(ydl_opts)
+            used_opts.pop("extractor_args", None)
+            with yt_dlp.YoutubeDL(used_opts) as ydl:
+                info = ydl.extract_info(media["webpage_url"], download=True)
+                rd = info.get("requested_downloads") or []
+                for r in rd:
+                    fp = r.get("filepath")
+                    if fp and os.path.exists(fp):
+                        return fp
+                filepath = ydl.prepare_filename(info)
+
+        stem = os.path.splitext(filepath)[0]
+        for try_ext in (".mp4", ".mkv", ".webm", ".m4a", ".opus", ".mp3"):
+            candidate = stem + try_ext
+            if os.path.exists(candidate):
+                return candidate
+        return filepath
 
     sem = get_download_semaphore()
     async with sem:
@@ -1085,21 +1297,30 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         entry = pl_data["entries"][idx]
-        target_url = entry.get("url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
+        target_url = entry_target_url(entry)
+        if not target_url:
+            await query.edit_message_text(t(update, "opt_not_found"), parse_mode="Markdown")
+            return
 
         await query.edit_message_text(t(update, "checking"), parse_mode="Markdown")
 
         def fetch_entry():
-            opts = dict(BASE_YTDL_OPTS)
-            opts["extract_flat"] = False
-            opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["ios", "mweb", "tv_embedded"],
-                    "player_skip": ["configs"],
-                }
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                return ydl.extract_info(target_url, download=False)
+            strategies = YOUTUBE_STRATEGIES if is_youtube_url(target_url) else [{}]
+            last_err = None
+            for strat in strategies:
+                opts = dict(BASE_YTDL_OPTS)
+                opts.update(strat)
+                opts["extract_flat"] = False
+                opts["skip_download"] = True
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        info = ydl.extract_info(target_url, download=False)
+                        if info and (info.get("formats") or info.get("url")):
+                            return info
+                except Exception as e:
+                    last_err = e
+                    continue
+            raise last_err or Exception("Unknown entry extract error")
 
         try:
             info = await asyncio.to_thread(fetch_entry)
