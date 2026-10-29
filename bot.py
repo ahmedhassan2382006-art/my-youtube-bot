@@ -95,20 +95,19 @@ BASE_YTDL_OPTS = {
 if COOKIE_FILE:
     BASE_YTDL_OPTS["cookiefile"] = COOKIE_FILE
 
-# ==================== استراتيجيات يوتيوب (مطابقة لمنهجية a4.py المُجرّبة) ====================
-# a4.py يعتمد أساساً على عملاء أندرويد/آي أو إس ثم الويب لجلب الفيديو كاملاً،
-# وهذا هو الأكثر ثباتاً وتوافقاً حالياً.
-YOUTUBE_PLAYER_CLIENTS = ["android", "ios", "mweb"]
-
+# ==================== استراتيجيات يوتيوب المتعددة (ترتيب مُختبر) ====================
+# ملاحظة: عميل ios وتحديد player_clients المقيّد صار يسبب خطأ
+# "Requested format is not available" في إصدارات yt-dlp الحديثة،
+# لذلك نعتمد أولاً على العملاء الافتراضيين ثم البدائل التي تعمل فعلاً.
 YOUTUBE_STRATEGIES = [
-    # 1) ترتيب a4.py المُجرّب: أندرويد ثم آي أو إس ثم الويب
-    {"extractor_args": {"youtube": {"player_client": list(YOUTUBE_PLAYER_CLIENTS)}}},
-    # 2) الافتراضي (يجلب أكبر عدد من الصيغ)
+    # 1) الافتراضي: يجلب أكبر عدد من الصيغ ويعمل باستقرار (الأفضل حالياً)
     {},
-    # 3) عميل VisionOS كبديل
+    # 2) عميل VisionOS: بديل ممتاز عند فشل الافتراضي
     {"extractor_args": {"youtube": {"player_client": ["visionos"]}}},
-    # 4) عملاء أندرويد المتقدّمون
-    {"extractor_args": {"youtube": {"player_client": ["android_vr", "visionos", "default"]}}},
+    # 3) عملاء أندرويد: خفيف وسريع ويجلب صيغاً مباشرة
+    {"extractor_args": {"youtube": {"player_client": ["android", "android_vr", "visionos"]}}},
+    # 4) دمج الافتراضي مع العملاء الصامدين ضد الحجب
+    {"extractor_args": {"youtube": {"player_client": ["default", "visionos", "android_vr"]}}},
 ]
 
 # ==================== إدارة الذاكرة والعمليات ====================
@@ -423,107 +422,6 @@ def entry_target_url(entry: dict) -> str:
     if re.match(r"^[A-Za-z0-9_-]{11}$", vid):
         return f"https://www.youtube.com/watch?v={vid}"
     return ""
-
-# ==================== منهجية فحص الروابط (مقلّدة من a4.py) ====================
-def _a4_base_opts(flat: bool = False) -> dict:
-    """إعدادات yt-dlp مطابقة لمنهجية a4.py"""
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "nocheckcertificate": True,
-    }
-    if COOKIE_FILE:
-        opts["cookiefile"] = COOKIE_FILE
-    ffmpeg_local = os.path.join(BASE_DIR, "ffmpeg.exe")
-    if os.path.isfile(ffmpeg_local):
-        opts["ffmpeg_location"] = BASE_DIR
-    elif shutil.which("ffmpeg"):
-        opts["ffmpeg_location"] = os.path.dirname(shutil.which("ffmpeg"))
-    return opts
-
-def _a4_flat_info(target_url: str):
-    """الفحص السريع: قائمة مسطّحة بكسل واحد (نفس منهجية a4.py)"""
-    opts = _a4_base_opts()
-    opts.update({
-        "extract_flat": "in_playlist",
-        "lazy_playlist": True,
-    })
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(target_url, download=False)
-
-def _a4_full_info(target_url: str, fallback_flat: Optional[dict] = None):
-    """جلب البيانات الكاملة (الصيغ/المدة) مع الرجوع للبيانات المسطّحة عند الفشل.
-    نجرّب عدة استراتيجيات ونختار الأفضل (الأكثر صيغاً وأعلى دقة) لضمان جودة كاملة."""
-    strategies = YOUTUBE_STRATEGIES if is_youtube_url(target_url) else [{}, {"http_headers": None}]
-
-    best_data = None
-    best_score = -1
-    last_err = None
-
-    for strat in strategies:
-        opts = _a4_base_opts()
-        opts.update(strat)
-        if opts.get("http_headers") is None:
-            opts.pop("http_headers", None)
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                data = ydl.extract_info(target_url, download=False)
-        except Exception as e:
-            last_err = e
-            continue
-
-        if not data:
-            continue
-
-        score = _format_quality_score(data)
-        if score > best_score:
-            best_score = score
-            best_data = data
-        # نكتفي مبكراً إذا وصلنا لجودة عالية جداً (1080p أو أعلى) لتفادي طلبات زائدة
-        if best_score >= 1080 * 1_000_000:
-            break
-
-    if best_data is not None:
-        return best_data
-    if fallback_flat:
-        return fallback_flat
-    raise last_err or Exception("Unknown extract error")
-
-def _format_quality_score(data: dict) -> int:
-    """مؤشر لجودة نتيجة الجلب: أكبر دقة متاحة ثم عدد الصيغ (لاختيار أفضل استراتيجية)"""
-    if not isinstance(data, dict):
-        return 0
-    formats = data.get("formats") or []
-    if not formats:
-        # بيانات مسطّحة (قائمة/عنصر) — نعتبرها مقبولة لكن بقيمة منخفضة
-        if data.get("url") or data.get("entries"):
-            return 1
-        return 0
-    max_height = 0
-    for f in formats:
-        h = f.get("height") or 0
-        if h > max_height:
-            max_height = h
-    count = len(formats)
-    return min(max_height, 999) * 1_000_000 + min(count, 999_999)
-
-def check_url_info(target_url: str) -> dict:
-    """الدالة الموحّدة لفحص أي رابط (فيديو/قائمة/قناة) بنفس أسلوب a4.py"""
-    flat = _a4_flat_info(target_url)
-
-    is_playlist = (
-        isinstance(flat, dict)
-        and (
-            flat.get("_type") == "playlist"
-            or isinstance(flat.get("entries"), (list, tuple))
-        )
-    )
-    if is_playlist:
-        return {"kind": "playlist", "flat": flat, "full": None}
-
-    full = _a4_full_info(target_url, fallback_flat=flat)
-    return {"kind": "media", "flat": flat, "full": full}
 
 # ==================== تحليل بيانات المقطع ====================
 def _pick_quality_label(width, height, format_note: str, format_id: str) -> Optional[str]:
@@ -864,20 +762,56 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
     
     status_msg = await update.message.reply_text(t(update, "checking"), parse_mode="Markdown")
 
-    # ===== معالجة روابط القنوات: تحويلها لتبويب الفيديوهات لجلب المقاطع الحقيقية =====
-    if is_youtube_channel_url(target_url):
-        target_url = channel_videos_url(target_url)
+    def fetch():
+        is_yt = is_youtube_url(target_url)
+
+        # استراتيجيات متعددة لتخطي أي حظر من يوتيوب وباقي المنصات
+        if is_yt:
+            strategies = YOUTUBE_STRATEGIES
+        else:
+            # للمنصات الأخرى: نجرب الترويسات المخصّصة أولاً ثم بدونها
+            # (بعض المنصات مثل فيسبوك ترفض بعض الترويسات)
+            strategies = [{}, {"http_headers": None}]
+
+        last_err = None
+        for strat in strategies:
+            opts = dict(BASE_YTDL_OPTS)
+            opts.update(strat)
+            if opts.get("http_headers") is None:
+                opts.pop("http_headers", None)
+            opts["extract_flat"] = "in_playlist"
+            opts["skip_download"] = True
+
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(target_url, download=False)
+                    if info:
+                        return info
+            except Exception as e:
+                last_err = e
+                continue
+
+        raise last_err or Exception("Unknown extract error")
 
     try:
-        result = await asyncio.to_thread(check_url_info, target_url)
+        info = await asyncio.to_thread(fetch)
     except Exception as e:
         logger.error(f"Error fetching url {target_url}: {e}")
         await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
         return
 
-    if result["kind"] == "playlist":
-        info = result["flat"]
-        entries = [e for e in (info.get("entries") or []) if e and not is_tab_entry(e)]
+    # ===== معالجة روابط القنوات: تحويلها لتبويب الفيديوهات لجلب المقاطع الحقيقية =====
+    if is_youtube_channel_url(target_url):
+        target_url = channel_videos_url(target_url)
+        try:
+            info = await asyncio.to_thread(fetch)
+        except Exception as e:
+            logger.error(f"Error fetching channel videos {target_url}: {e}")
+            await status_msg.edit_text(t(update, "fetch_error"), parse_mode="Markdown")
+            return
+
+    if is_real_playlist(info):
+        entries = [e for e in info.get("entries", []) if e and not is_tab_entry(e)]
         if not entries:
             await status_msg.edit_text(t(update, "no_formats"))
             return
@@ -904,7 +838,6 @@ async def process_single_link(target_url: str, update: Update, context: ContextT
         )
         return
 
-    info = result["full"]
     video_opts, audio_fmts, best_prog = parse_media_data(info)
     if not video_opts and not audio_fmts:
         await status_msg.edit_text(t(update, "no_formats"))
@@ -1121,10 +1054,10 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
 
     is_youtube = is_youtube_url(media["webpage_url"])
     if is_youtube:
-        # ترتيب عملاء يوتيوب المطابق لمنهجية a4.py المُجرّبة
+        # نستخدم العملاء الافتراضيين (الأكثر استقراراً) مع بدائل تعمل فعلاً
         ydl_opts["extractor_args"] = {
             "youtube": {
-                "player_client": list(YOUTUBE_PLAYER_CLIENTS),
+                "player_client": ["default", "visionos", "android_vr"],
             }
         }
 
@@ -1140,30 +1073,19 @@ async def perform_download_and_send(query, update: Update, media: dict, mode: st
                         return fp
                 filepath = ydl.prepare_filename(info)
         except Exception:
-            # إن فشلت الاستراتيجية المحددة، نعيد المحاولة بإعدادات احتياطية متعددة
+            # إن فشلت الاستراتيجية المحددة، نعيد المحاولة بالإعدادات الافتراضية
+            if not is_youtube:
+                raise
             used_opts = dict(ydl_opts)
             used_opts.pop("extractor_args", None)
-            try:
-                with yt_dlp.YoutubeDL(used_opts) as ydl:
-                    info = ydl.extract_info(media["webpage_url"], download=True)
-                    rd = info.get("requested_downloads") or []
-                    for r in rd:
-                        fp = r.get("filepath")
-                        if fp and os.path.exists(fp):
-                            return fp
-                    filepath = ydl.prepare_filename(info)
-            except Exception:
-                used_opts = dict(ydl_opts)
-                used_opts.pop("extractor_args", None)
-                used_opts.pop("http_headers", None)
-                with yt_dlp.YoutubeDL(used_opts) as ydl:
-                    info = ydl.extract_info(media["webpage_url"], download=True)
-                    rd = info.get("requested_downloads") or []
-                    for r in rd:
-                        fp = r.get("filepath")
-                        if fp and os.path.exists(fp):
-                            return fp
-                    filepath = ydl.prepare_filename(info)
+            with yt_dlp.YoutubeDL(used_opts) as ydl:
+                info = ydl.extract_info(media["webpage_url"], download=True)
+                rd = info.get("requested_downloads") or []
+                for r in rd:
+                    fp = r.get("filepath")
+                    if fp and os.path.exists(fp):
+                        return fp
+                filepath = ydl.prepare_filename(info)
 
         stem = os.path.splitext(filepath)[0]
         for try_ext in (".mp4", ".mkv", ".webm", ".m4a", ".opus", ".mp3"):
@@ -1382,18 +1304,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(t(update, "checking"), parse_mode="Markdown")
 
+        def fetch_entry():
+            strategies = YOUTUBE_STRATEGIES if is_youtube_url(target_url) else [{}]
+            last_err = None
+            for strat in strategies:
+                opts = dict(BASE_YTDL_OPTS)
+                opts.update(strat)
+                opts["extract_flat"] = False
+                opts["skip_download"] = True
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        info = ydl.extract_info(target_url, download=False)
+                        if info and (info.get("formats") or info.get("url")):
+                            return info
+                except Exception as e:
+                    last_err = e
+                    continue
+            raise last_err or Exception("Unknown entry extract error")
+
         try:
-            entry_info = await asyncio.to_thread(_a4_full_info, target_url, entry)
+            info = await asyncio.to_thread(fetch_entry)
         except Exception as e:
             logger.error(f"Failed to fetch entry: {e}")
             await query.edit_message_text(t(update, "fetch_error"), parse_mode="Markdown")
             return
 
-        info = entry_info
         video_opts, audio_fmts, best_prog = parse_media_data(info)
-        if not video_opts and not audio_fmts:
-            await query.edit_message_text(t(update, "no_formats"))
-            return
         media_id = uuid.uuid4().hex[:8]
         MEDIA_CACHE[media_id] = {
             "id": media_id,
